@@ -16,6 +16,7 @@ provider:
     SESSION_DRIVER: array
     LOG_CHANNEL: stderr
     QUEUE_CONNECTION: sqs
+    FRONTEND_URL: https://prelease-frontend.vercel.app
     FILESYSTEM_DISK: s3
     SQS_PREFIX: !Ref JobsQueue
 
@@ -50,17 +51,14 @@ package:
     - '!README.md'
     - '!.git/**'
     - '!.github/**'
-    # Exclude composer phar/cache (98MB)
+    # Exclude composer phar/cache
     - '!composer.phar'
     - '!composer.lock'
     - '!vendor/composer/ca-bundle/**'
     - '!vendor/composer/pcre/**'
-    # Exclude Google API services not needed (114MB -> ~0.5MB)
-    - '!vendor/google/apiclient-services/src/**'
-    - 'vendor/google/apiclient-services/src/Oauth2.php'
-    - 'vendor/google/apiclient-services/src/Oauth2/**'
-    - 'vendor/google/apiclient-services/src/PeopleService.php'
-    - 'vendor/google/apiclient-services/src/PeopleService/**'
+    - '!vendor/composer/59d54b6a/**'
+    # Exclude ALL Google API services (114MB, thousands of files)
+    - '!vendor/google/apiclient-services/**'
     # Exclude vendor test/doc files
     - '!vendor/**/tests/**'
     - '!vendor/**/test/**'
