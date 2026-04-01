@@ -16,7 +16,7 @@ provider:
     SESSION_DRIVER: array
     LOG_CHANNEL: stderr
     QUEUE_CONNECTION: sqs
-    FRONTEND_URL: https://prelease-frontend-pi.vercel.app
+    FRONTEND_URL: https://dev.preleasecanada.ca
     FILESYSTEM_DISK: s3
     SQS_PREFIX: !Ref JobsQueue
 
