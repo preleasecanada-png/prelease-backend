@@ -56,9 +56,12 @@ package:
     - '!composer.lock'
     - '!vendor/composer/ca-bundle/**'
     - '!vendor/composer/pcre/**'
-    - '!vendor/composer/59d54b6a/**'
-    # Exclude ALL Google API services (114MB, thousands of files)
-    - '!vendor/google/apiclient-services/**'
+    # Exclude Google API services src/ (114MB, thousands of files) but keep autoload.php
+    - '!vendor/google/apiclient-services/src/**'
+    - 'vendor/google/apiclient-services/src/Oauth2.php'
+    - 'vendor/google/apiclient-services/src/Oauth2/**'
+    - 'vendor/google/apiclient-services/src/PeopleService.php'
+    - 'vendor/google/apiclient-services/src/PeopleService/**'
     # Exclude vendor test/doc files
     - '!vendor/**/tests/**'
     - '!vendor/**/test/**'
