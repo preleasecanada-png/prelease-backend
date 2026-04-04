@@ -13,6 +13,7 @@ use App\Models\PropertyImages;
 use App\Models\WishList;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class PropertyController extends Controller
@@ -69,12 +70,12 @@ class PropertyController extends Controller
                 foreach ($request->file('property_images') as $file) {
                     $extension = $file->getClientOriginalExtension();
                     $baseName = time() . rand() . '.' . $extension;
-                    $file->move(public_path('images/place_gallery_images'), $baseName);
-                    $fileName = 'images/place_gallery_images/' . $baseName;
+                    $s3Path = 'images/place_gallery_images/' . $baseName;
+                    Storage::disk('s3')->put($s3Path, file_get_contents($file));
                     Log::info($extension);
                     PropertyImages::create([
                         'property_id' => $property_id,
-                        'original' => $fileName,
+                        'original' => $s3Path,
                         'extension' => $extension ?? 'png',
                     ]);
                 }
@@ -319,7 +320,11 @@ class PropertyController extends Controller
     public function update(Request $request, $id)
     {
         try {
+            Log::info('Property update called', ['id' => $id, 'fields' => $request->except('property_images')]);
             $user = Auth::user();
+            if (!$user) {
+                return response()->json(['status' => 401, 'message' => 'Unauthenticated'], 401);
+            }
             $property = Property::where('user_id', $user->id)->findOrFail($id);
 
             $fields = [
@@ -344,11 +349,11 @@ class PropertyController extends Controller
                 foreach ($request->file('property_images') as $file) {
                     $extension = $file->getClientOriginalExtension();
                     $baseName = time() . rand() . '.' . $extension;
-                    $file->move(public_path('images/place_gallery_images'), $baseName);
-                    $fileName = 'images/place_gallery_images/' . $baseName;
+                    $s3Path = 'images/place_gallery_images/' . $baseName;
+                    Storage::disk('s3')->put($s3Path, file_get_contents($file));
                     PropertyImages::create([
                         'property_id' => $property->id,
-                        'original' => $fileName,
+                        'original' => $s3Path,
                         'extension' => $extension ?? 'png',
                     ]);
                 }
@@ -386,9 +391,9 @@ class PropertyController extends Controller
                 $q->where('user_id', $user->id);
             })->findOrFail($imageId);
 
-            $filePath = public_path($image->original);
-            if (file_exists($filePath)) {
-                unlink($filePath);
+            // Delete from S3
+            if ($image->original && Storage::disk('s3')->exists($image->original)) {
+                Storage::disk('s3')->delete($image->original);
             }
             $image->delete();
 

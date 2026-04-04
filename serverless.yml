@@ -7,6 +7,26 @@ provider:
   runtime: provided.al2023
   memorySize: 1024
   timeout: 28
+  httpApi:
+    cors:
+      allowedOrigins:
+        - https://www.preleasecanada.ca
+        - https://preleasecanada.ca
+        - https://dev.preleasecanada.ca
+        - http://localhost:3000
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+        - Accept
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+        - PATCH
+      maxAge: 86400
+      allowCredentials: true
   environment:
     APP_ENV: production
     APP_DEBUG: false
@@ -34,6 +54,11 @@ provider:
             - sqs:*
           Resource:
             - !GetAtt JobsQueue.Arn
+        - Effect: Allow
+          Action:
+            - ses:SendEmail
+            - ses:SendRawEmail
+          Resource: '*'
 
 custom:
   s3Bucket: prelease-storage-${self:provider.stage}
@@ -44,6 +69,8 @@ package:
     - '!public/storage/**'
     - '!resources/js/**'
     - '!storage/**'
+    - 'storage/oauth-private.key'
+    - 'storage/oauth-public.key'
     - '!tests/**'
     - '!.env.example'
     - '!phpunit.xml'
@@ -73,11 +100,24 @@ package:
     - '!vendor/**/README*'
     - '!vendor/**/doc/**'
     - '!vendor/**/docs/**'
-    # Exclude AWS SDK services not needed
-    - '!vendor/aws/aws-sdk-php/src/data/[a-qs-z]*/**'
+    # Exclude AWS SDK services not needed (keep only s3, sqs, sts, ses)
+    - '!vendor/aws/aws-sdk-php/src/data/**'
     - 'vendor/aws/aws-sdk-php/src/data/s3/**'
     - 'vendor/aws/aws-sdk-php/src/data/sqs/**'
     - 'vendor/aws/aws-sdk-php/src/data/sts/**'
+    - 'vendor/aws/aws-sdk-php/src/data/ses/**'
+    - 'vendor/aws/aws-sdk-php/src/data/manifest.json*'
+    - 'vendor/aws/aws-sdk-php/src/data/aliases.json*'
+    # Exclude unused AWS SDK service classes
+    - '!vendor/aws/aws-sdk-php/src/[A-R]*/**'
+    - '!vendor/aws/aws-sdk-php/src/[T-Z]*/**'
+    - 'vendor/aws/aws-sdk-php/src/S3/**'
+    - 'vendor/aws/aws-sdk-php/src/Sqs/**'
+    - 'vendor/aws/aws-sdk-php/src/Sts/**'
+    - 'vendor/aws/aws-sdk-php/src/Ses/**'
+    # Exclude composer installer cache and vendor cache dirs
+    - '!vendor/composer/installed.json'
+    - '!vendor/composer/[0-9a-f]*/**'
 
 functions:
   web:
