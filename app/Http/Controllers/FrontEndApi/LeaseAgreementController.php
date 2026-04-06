@@ -86,6 +86,12 @@ class LeaseAgreementController extends Controller
             $insuranceFee = 0;
             $totalPayable = $totalRent + $supportFee + $commissionFee + $insuranceFee;
 
+            $application->load(['property', 'renter', 'landlord']);
+            $property = $application->property;
+            $renterUser = $application->renter;
+            $landlordUser = $application->landlord ?? $user;
+            $province = $property->state ?? $property->city ?? 'Ontario';
+
             $lease = LeaseAgreement::create([
                 'property_id' => $application->property_id,
                 'renter_id' => $application->renter_id,
@@ -102,7 +108,10 @@ class LeaseAgreementController extends Controller
                 'total_payable' => $totalPayable,
                 'status' => 'pending_renter_signature',
                 'special_conditions' => $request->special_conditions,
-                'terms' => $this->generateLeaseTerms($leaseType, $monthlyRent, $startDate, $endDate),
+                'terms' => $this->generateProvincialLease(
+                    $province, $leaseType, $monthlyRent, $startDate, $endDate,
+                    $property, $renterUser, $landlordUser, $request->special_conditions
+                ),
             ]);
 
             $lease->load(['property', 'renter', 'landlord']);
@@ -231,5 +240,150 @@ class LeaseAgreementController extends Controller
             . "2. Rental insurance is mandatory and will be arranged through Prelease Canada.\n"
             . "3. This lease is governed by the applicable provincial tenancy laws.\n"
             . "4. Both parties agree to the terms outlined in this agreement.\n";
+    }
+
+    private function generateProvincialLease($province, $leaseType, $monthlyRent, $startDate, $endDate, $property, $renter, $landlord, $specialConditions = null)
+    {
+        $months = $leaseType === '3_month' ? 3 : 6;
+        $totalRent = $monthlyRent * $months;
+        $supportFee = 100 * $months;
+        $commission = $totalRent * 0.05;
+        $estInsurance = $totalRent * 0.02;
+        $totalPayable = $totalRent + $supportFee + $commission + $estInsurance;
+
+        $provincialRef = $this->getProvincialReference($province);
+
+        $doc = "═══════════════════════════════════════════════════════════════\n";
+        $doc .= "                  PRELEASE CANADA — RESIDENTIAL LEASE AGREEMENT\n";
+        $doc .= "═══════════════════════════════════════════════════════════════\n\n";
+
+        $doc .= "Governed by: {$provincialRef['act']}\n";
+        $doc .= "Province: {$provincialRef['name']}\n";
+        $doc .= "Date of Agreement: " . now()->format('F d, Y') . "\n\n";
+
+        $doc .= "─── PARTIES ───────────────────────────────────────────────────\n\n";
+        $doc .= "LANDLORD:\n";
+        $doc .= "  Name: " . ($landlord->first_name ?? '') . " " . ($landlord->last_name ?? '') . "\n";
+        $doc .= "  Email: " . ($landlord->email ?? '') . "\n\n";
+
+        $doc .= "TENANT:\n";
+        $doc .= "  Name: " . ($renter->first_name ?? '') . " " . ($renter->last_name ?? '') . "\n";
+        $doc .= "  Email: " . ($renter->email ?? '') . "\n\n";
+
+        $doc .= "─── RENTAL PROPERTY ───────────────────────────────────────────\n\n";
+        $doc .= "  Address: " . ($property->address ?? '') . "\n";
+        $doc .= "  City: " . ($property->city ?? '') . ", " . ($property->state ?? '') . "\n";
+        $doc .= "  Property Type: " . ($property->property_type ?? 'Residential') . "\n";
+        $doc .= "  Bedrooms: " . ($property->no_of_bedrooms ?? 'N/A') . "  |  Bathrooms: " . ($property->no_of_bathrooms ?? 'N/A') . "\n\n";
+
+        $doc .= "─── LEASE TERMS ───────────────────────────────────────────────\n\n";
+        $doc .= "  Lease Duration: " . str_replace('_', ' ', $leaseType) . " (" . $months . " months)\n";
+        $doc .= "  Start Date: " . $startDate->format('F d, Y') . "\n";
+        $doc .= "  End Date: " . $endDate->format('F d, Y') . "\n\n";
+
+        $doc .= "─── FINANCIAL TERMS ───────────────────────────────────────────\n\n";
+        $doc .= "  Monthly Rent:           $" . number_format($monthlyRent, 2) . "\n";
+        $doc .= "  Total Rent ({$months} mo):     $" . number_format($totalRent, 2) . "\n";
+        $doc .= "  Support Fee (\$100/mo):  $" . number_format($supportFee, 2) . "\n";
+        $doc .= "  Commission (5%):        $" . number_format($commission, 2) . "\n";
+        $doc .= "  Est. Insurance (2%):    $" . number_format($estInsurance, 2) . "\n";
+        $doc .= "  ────────────────────────────────\n";
+        $doc .= "  TOTAL PAYABLE:          $" . number_format($totalPayable, 2) . "\n\n";
+        $doc .= "  Payment Method: Full upfront payment via Prelease Canada platform\n\n";
+
+        if ($specialConditions) {
+            $doc .= "─── SPECIAL CONDITIONS ────────────────────────────────────────\n\n";
+            $doc .= "  " . $specialConditions . "\n\n";
+        }
+
+        $doc .= "─── STANDARD TERMS & CONDITIONS ───────────────────────────────\n\n";
+        $doc .= "1. PAYMENT: The full rent amount and all fees must be paid upfront\n";
+        $doc .= "   through the Prelease Canada platform before the lease start date.\n\n";
+        $doc .= "2. INSURANCE: Rental insurance is mandatory and will be arranged\n";
+        $doc .= "   through Prelease Canada. The exact premium is confirmed at signing.\n\n";
+        $doc .= "3. MAINTENANCE: The Landlord is responsible for major repairs and\n";
+        $doc .= "   maintaining the property in a habitable condition. Tenant must\n";
+        $doc .= "   report maintenance issues promptly via the platform.\n\n";
+        $doc .= "4. QUIET ENJOYMENT: The Tenant has the right to reasonable quiet\n";
+        $doc .= "   enjoyment of the premises during the lease term.\n\n";
+        $doc .= "5. CONDITION OF PREMISES: The Tenant agrees to keep the premises\n";
+        $doc .= "   in a clean and good condition, ordinary wear and tear excepted.\n\n";
+        $doc .= "6. SUBLETTING: Subletting is not permitted without prior written\n";
+        $doc .= "   consent from the Landlord.\n\n";
+        $doc .= "7. TERMINATION: Early termination is subject to the terms of\n";
+        $doc .= "   this agreement and applicable provincial legislation.\n\n";
+
+        $doc .= "─── PROVINCIAL COMPLIANCE ─────────────────────────────────────\n\n";
+        $doc .= $provincialRef['terms'] . "\n\n";
+
+        $doc .= "─── ELECTRONIC SIGNATURES ─────────────────────────────────────\n\n";
+        $doc .= "Both parties agree that electronic signatures via the Prelease\n";
+        $doc .= "Canada platform constitute valid and binding signatures under\n";
+        $doc .= "Canadian federal and provincial electronic commerce legislation.\n\n";
+
+        $doc .= "Landlord Signature: ____________________  Date: __________\n";
+        $doc .= "Tenant Signature:   ____________________  Date: __________\n\n";
+
+        $doc .= "═══════════════════════════════════════════════════════════════\n";
+        $doc .= "  Facilitated by Prelease Canada | prelease.ca\n";
+        $doc .= "═══════════════════════════════════════════════════════════════\n";
+
+        return $doc;
+    }
+
+    private function getProvincialReference($province)
+    {
+        $p = strtolower(trim($province));
+
+        $map = [
+            'ontario' => [
+                'name' => 'Ontario',
+                'act' => 'Residential Tenancies Act, 2006 (Ontario)',
+                'terms' => "This lease is governed by the Ontario Residential Tenancies Act, 2006.\n"
+                    . "- The Landlord and Tenant Board (LTB) resolves disputes.\n"
+                    . "- Rent increases are limited to the annual guideline published by the Ontario government.\n"
+                    . "- The landlord cannot require post-dated cheques or more than first and last month's rent as deposit.\n"
+                    . "- Standard form lease (Ontario Form) provisions apply where not superseded.",
+            ],
+            'quebec' => [
+                'name' => 'Quebec',
+                'act' => 'Civil Code of Quebec, Articles 1851-2000',
+                'terms' => "This lease is governed by the Civil Code of Quebec.\n"
+                    . "- The Tribunal administratif du logement (TAL) resolves disputes.\n"
+                    . "- Rent increases require proper notice and are subject to TAL guidelines.\n"
+                    . "- The lease automatically renews unless proper notice is given.\n"
+                    . "- Security deposits are NOT permitted under Quebec law.",
+            ],
+            'british columbia' => [
+                'name' => 'British Columbia',
+                'act' => 'Residential Tenancy Act (British Columbia)',
+                'terms' => "This lease is governed by the BC Residential Tenancy Act.\n"
+                    . "- The Residential Tenancy Branch (RTB) resolves disputes.\n"
+                    . "- Maximum security deposit is half of one month's rent.\n"
+                    . "- Rent increases are limited to the annual allowable percentage.\n"
+                    . "- Condition inspection reports are required at move-in and move-out.",
+            ],
+            'alberta' => [
+                'name' => 'Alberta',
+                'act' => 'Residential Tenancies Act (Alberta)',
+                'terms' => "This lease is governed by the Alberta Residential Tenancies Act.\n"
+                    . "- The Residential Tenancy Dispute Resolution Service (RTDRS) resolves disputes.\n"
+                    . "- Security deposit cannot exceed one month's rent.\n"
+                    . "- Interest must be paid on security deposits annually.\n"
+                    . "- Written notice requirements apply for lease termination.",
+            ],
+        ];
+
+        foreach ($map as $key => $val) {
+            if (str_contains($p, $key)) return $val;
+        }
+
+        return [
+            'name' => $province,
+            'act' => 'Applicable Provincial Residential Tenancy Legislation',
+            'terms' => "This lease is governed by the applicable provincial residential\n"
+                . "tenancy legislation. Both parties are encouraged to consult the\n"
+                . "relevant provincial tenancy authority for specific rights and obligations.",
+        ];
     }
 }

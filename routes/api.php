@@ -19,6 +19,7 @@ use App\Http\Controllers\FrontEndApi\MaintenanceRequestController;
 use App\Http\Controllers\FrontEndApi\DashboardController;
 use App\Http\Controllers\FrontEndApi\AdminController;
 use App\Http\Controllers\FrontEndApi\AIAssistantController;
+use App\Http\Controllers\FrontEndApi\BackgroundCheckController;
 use App\Http\Controllers\AdminApplicationController;
 use App\Http\Controllers\AdminPaymentController;
 use App\Http\Controllers\AdminReferralController;
@@ -177,6 +178,14 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/', 'store');
         Route::get('/{id}', 'show');
         Route::post('/{id}/status', 'updateStatus');
+    });
+
+    // Background Checks
+    Route::prefix('background-checks')->controller(BackgroundCheckController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::post('/request', 'request');
+        Route::post('/{id}/consent', 'consent');
+        Route::get('/{id}', 'show');
     });
 
     // Dashboard
