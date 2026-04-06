@@ -30,6 +30,10 @@ class LeaseAgreement extends Model
         'lease_document_path',
         'terms',
         'special_conditions',
+        'payment_plan',
+        'landlord_allows_monthly',
+        'monthly_support_fee',
+        'monthly_commission_rate',
     ];
 
     protected $casts = [

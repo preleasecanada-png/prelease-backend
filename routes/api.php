@@ -124,6 +124,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/', 'index');
         Route::post('/initiate', 'initiatePayment');
         Route::get('/breakdown/{leaseId}', 'breakdown');
+        Route::post('/toggle-monthly/{leaseId}', 'toggleMonthlyPayment');
         Route::get('/{id}', 'show');
         Route::post('/{id}/confirm', 'confirmPayment');
     });

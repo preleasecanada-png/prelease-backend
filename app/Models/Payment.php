@@ -31,6 +31,10 @@ class Payment extends Model
         'insurance_payout_amount',
         'notes',
         'paid_at',
+        'installment_number',
+        'total_installments',
+        'due_date',
+        'installment_group',
     ];
 
     protected $casts = [
@@ -43,6 +47,7 @@ class Payment extends Model
         'insurance_payout_amount' => 'decimal:2',
         'paid_at' => 'datetime',
         'landlord_paid_at' => 'datetime',
+        'due_date' => 'date',
     ];
 
     public function leaseAgreement()
