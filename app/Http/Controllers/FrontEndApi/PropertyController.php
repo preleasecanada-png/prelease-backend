@@ -189,6 +189,19 @@ class PropertyController extends Controller
                 $query->where('describe_your_place', $request->property_type);
             }
 
+            if ($request->min_guests) {
+                $query->where('how_many_guests', '>=', $request->min_guests);
+            }
+
+            if ($request->amenities) {
+                $amenityIds = is_array($request->amenities) ? $request->amenities : explode(',', $request->amenities);
+                foreach ($amenityIds as $amenityId) {
+                    $query->whereHas('amenities', function ($q) use ($amenityId) {
+                        $q->where('amenties.id', $amenityId);
+                    });
+                }
+            }
+
             if ($request->sort_by) {
                 switch ($request->sort_by) {
                     case 'price_asc':
