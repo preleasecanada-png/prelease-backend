@@ -47,6 +47,58 @@ class AdminController extends Controller
                 ];
             }
 
+            // Advanced analytics
+            $totalApplications = RentalApplication::count();
+            $pendingApplications = RentalApplication::where('status', 'pending')->count();
+            $approvedApplications = RentalApplication::where('status', 'approved')->count();
+            $rejectedApplications = RentalApplication::where('status', 'rejected')->count();
+
+            $totalLeases = LeaseAgreement::count();
+            $activeLeases = LeaseAgreement::where('status', 'active')->count();
+
+            $totalPayments = Payment::count();
+            $totalRevenue = Payment::where('status', 'paid')->sum('total_amount');
+            $totalCommission = Payment::where('status', 'paid')->sum('commission_fee');
+
+            $totalMaintenance = \App\Models\MaintenanceRequest::count();
+            $openMaintenance = \App\Models\MaintenanceRequest::whereIn('status', ['pending', 'in_progress'])->count();
+
+            // Monthly revenue (last 6 months)
+            $monthlyRevenue = [];
+            for ($i = 5; $i >= 0; $i--) {
+                $date = now()->subMonths($i);
+                $rev = Payment::where('status', 'paid')
+                    ->whereYear('created_at', $date->year)
+                    ->whereMonth('created_at', $date->month)
+                    ->sum('total_amount');
+                $monthlyRevenue[] = [
+                    'month' => $date->format('M Y'),
+                    'amount' => round((float)$rev, 2),
+                ];
+            }
+
+            // Monthly listings (last 6 months)
+            $monthlyListings = [];
+            for ($i = 5; $i >= 0; $i--) {
+                $date = now()->subMonths($i);
+                $count = Property::whereYear('created_at', $date->year)
+                    ->whereMonth('created_at', $date->month)
+                    ->count();
+                $monthlyListings[] = [
+                    'month' => $date->format('M Y'),
+                    'count' => $count,
+                ];
+            }
+
+            // Top cities by listings
+            $topCities = Property::selectRaw('city, COUNT(*) as count')
+                ->whereNotNull('city')
+                ->where('city', '!=', '')
+                ->groupBy('city')
+                ->orderByDesc('count')
+                ->take(5)
+                ->get();
+
             return response()->json([
                 'status' => 200,
                 'data' => [
@@ -56,9 +108,23 @@ class AdminController extends Controller
                     'total_admins' => $totalAdmins,
                     'total_properties' => $totalProperties,
                     'total_images' => $totalImages,
+                    'total_applications' => $totalApplications,
+                    'pending_applications' => $pendingApplications,
+                    'approved_applications' => $approvedApplications,
+                    'rejected_applications' => $rejectedApplications,
+                    'total_leases' => $totalLeases,
+                    'active_leases' => $activeLeases,
+                    'total_payments' => $totalPayments,
+                    'total_revenue' => round((float)$totalRevenue, 2),
+                    'total_commission' => round((float)$totalCommission, 2),
+                    'total_maintenance' => $totalMaintenance,
+                    'open_maintenance' => $openMaintenance,
                     'recent_users' => $recentUsers,
                     'recent_properties' => $recentProperties,
                     'monthly_users' => $monthlyUsers,
+                    'monthly_revenue' => $monthlyRevenue,
+                    'monthly_listings' => $monthlyListings,
+                    'top_cities' => $topCities,
                 ],
             ]);
         } catch (\Throwable $th) {

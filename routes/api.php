@@ -180,6 +180,7 @@ Route::middleware('auth:api')->group(function () {
 
     // Dashboard
     Route::get('dashboard/stats', [DashboardController::class, 'stats']);
+    Route::get('dashboard/landlord-report', [DashboardController::class, 'landlordReport']);
 
     // AI Assistant
     Route::prefix('ai-assistant')->controller(AIAssistantController::class)->group(function () {
