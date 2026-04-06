@@ -165,6 +165,7 @@ Route::middleware('auth:api')->group(function () {
     Route::prefix('notifications')->controller(NotificationController::class)->group(function () {
         Route::get('/', 'index');
         Route::get('/unread-count', 'unreadCount');
+        Route::get('/proactive', 'proactive');
         Route::post('/mark-all-read', 'markAllAsRead');
         Route::post('/{id}/read', 'markAsRead');
         Route::delete('/{id}', 'destroy');
