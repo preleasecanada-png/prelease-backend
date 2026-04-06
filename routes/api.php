@@ -18,6 +18,7 @@ use App\Http\Controllers\FrontEndApi\NotificationController;
 use App\Http\Controllers\FrontEndApi\MaintenanceRequestController;
 use App\Http\Controllers\FrontEndApi\DashboardController;
 use App\Http\Controllers\FrontEndApi\AdminController;
+use App\Http\Controllers\FrontEndApi\AIAssistantController;
 use App\Http\Controllers\AdminApplicationController;
 use App\Http\Controllers\AdminPaymentController;
 use App\Http\Controllers\AdminReferralController;
@@ -179,6 +180,12 @@ Route::middleware('auth:api')->group(function () {
 
     // Dashboard
     Route::get('dashboard/stats', [DashboardController::class, 'stats']);
+
+    // AI Assistant
+    Route::prefix('ai-assistant')->controller(AIAssistantController::class)->group(function () {
+        Route::post('/chat', 'chat');
+        Route::get('/suggestions', 'suggestions');
+    });
 
     // My Properties (Landlord)
     Route::get('property/my-properties', [PropertyController::class, 'myProperties']);
