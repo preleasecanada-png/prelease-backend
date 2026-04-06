@@ -20,14 +20,24 @@ class PropertyController extends Controller
 {
     protected function store(Request $request)
     {
-        // $validation = Validator::make($request->all(), [
-        //     'title' => 'required',
-        //     'description' => 'required',
-        // ]);
-        // if ($validation->fails()) {
-        //     $errors = $validation->errors();
-        //     return response()->json(['errors' => $errors], 422);
-        // }
+        $validation = Validator::make($request->all(), [
+            'title' => 'required|string|max:100',
+            'description' => 'required|string|max:1000',
+            'describe_your_place' => 'required|string',
+            'country' => 'required|string',
+            'address' => 'required|string',
+            'street' => 'required|string',
+            'city' => 'required|string',
+            'how_many_guests' => 'required|integer|min:1',
+            'how_many_bedrooms' => 'required|integer|min:1',
+            'how_many_bathroom' => 'required|integer|min:1',
+            'set_your_price' => 'required|numeric|min:1',
+            'amenities' => 'required|array|min:1',
+            'property_images' => 'required|array|min:1',
+        ]);
+        if ($validation->fails()) {
+            return response()->json(['errors' => $validation->errors()], 422);
+        }
         try {
             $property_id = null;
             $property = new Property();
