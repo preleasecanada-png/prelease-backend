@@ -145,7 +145,7 @@ PROMPT;
                 return response()->json(['error' => 'Unauthorized'], 401);
             }
 
-            $apiKey = env('OPENAI_API_KEY');
+            $apiKey = env('GEMINI_API_KEY');
             if (!$apiKey) {
                 return response()->json(['error' => 'AI service not configured'], 503);
             }
@@ -153,43 +153,51 @@ PROMPT;
             $context = $this->getUserContext($user);
             $systemPrompt = $this->getSystemPrompt($user, $context);
 
-            // Build messages array
-            $messages = [
-                ['role' => 'system', 'content' => $systemPrompt],
-            ];
+            // Build Gemini contents array
+            $contents = [];
 
             // Add conversation history (last 10 exchanges max)
             $history = $request->conversation ?? [];
             $history = array_slice($history, -20);
             foreach ($history as $msg) {
                 if (isset($msg['role']) && isset($msg['content'])) {
-                    $messages[] = [
-                        'role' => $msg['role'],
-                        'content' => $msg['content'],
+                    $contents[] = [
+                        'role' => $msg['role'] === 'assistant' ? 'model' : 'user',
+                        'parts' => [['text' => $msg['content']]],
                     ];
                 }
             }
 
             // Add current message
-            $messages[] = ['role' => 'user', 'content' => $request->message];
+            $contents[] = [
+                'role' => 'user',
+                'parts' => [['text' => $request->message]],
+            ];
 
+            $model = env('GEMINI_MODEL', 'gemini-2.5-flash');
             $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $apiKey,
                 'Content-Type' => 'application/json',
-            ])->timeout(30)->post('https://api.openai.com/v1/chat/completions', [
-                'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
-                'messages' => $messages,
-                'max_tokens' => 800,
-                'temperature' => 0.7,
-            ]);
+            ])->timeout(30)->post(
+                "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
+                [
+                    'system_instruction' => [
+                        'parts' => [['text' => $systemPrompt]],
+                    ],
+                    'contents' => $contents,
+                    'generationConfig' => [
+                        'maxOutputTokens' => 800,
+                        'temperature' => 0.7,
+                    ],
+                ]
+            );
 
             if ($response->failed()) {
-                Log::error('OpenAI API error', ['status' => $response->status(), 'body' => $response->body()]);
-                return response()->json(['error' => 'AI service temporarily unavailable'], 503);
+                Log::error('Gemini API error', ['status' => $response->status(), 'body' => $response->body()]);
+                return response()->json(['error' => 'AI service temporarily unavailable: ' . ($response->json()['error']['message'] ?? 'Unknown error')], 503);
             }
 
             $data = $response->json();
-            $reply = $data['choices'][0]['message']['content'] ?? 'Sorry, I could not generate a response.';
+            $reply = $data['candidates'][0]['content']['parts'][0]['text'] ?? 'Sorry, I could not generate a response.';
 
             return response()->json([
                 'status' => 200,
