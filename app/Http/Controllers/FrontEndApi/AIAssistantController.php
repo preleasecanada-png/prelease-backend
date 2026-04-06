@@ -145,7 +145,7 @@ PROMPT;
                 return response()->json(['error' => 'Unauthorized'], 401);
             }
 
-            $apiKey = env('GEMINI_API_KEY');
+            $apiKey = config('services.gemini.api_key');
             if (!$apiKey) {
                 return response()->json(['error' => 'AI service not configured'], 503);
             }
@@ -174,7 +174,7 @@ PROMPT;
                 'parts' => [['text' => $request->message]],
             ];
 
-            $model = env('GEMINI_MODEL', 'gemini-2.5-flash');
+            $model = config('services.gemini.model', 'gemini-2.5-flash');
             $response = Http::withHeaders([
                 'Content-Type' => 'application/json',
             ])->timeout(30)->post(
