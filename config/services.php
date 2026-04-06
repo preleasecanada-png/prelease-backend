@@ -59,4 +59,8 @@ return [
         'model' => env('GEMINI_MODEL', 'gemini-2.5-flash'),
     ],
 
+    'frontend' => [
+        'url' => env('FRONTEND_URL', 'https://www.preleasecanada.ca'),
+    ],
+
 ];

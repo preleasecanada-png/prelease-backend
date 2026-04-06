@@ -178,7 +178,7 @@ PROMPT;
             $isRenter = in_array($user->role, ['renter', 'Tenant', null, '']);
 
             // ── Frontend base URL ──
-            $context['base_url'] = config('app.frontend_url', env('FRONTEND_URL', 'https://www.preleasecanada.ca'));
+            $context['base_url'] = config('services.frontend.url', 'https://www.preleasecanada.ca');
 
             // ── All available properties (for everyone) ──
             $context['all_properties'] = Property::with(['amenities:id,name', 'reviews'])
