@@ -6,7 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Models\Property;
 use App\Models\LeaseAgreement;
 use App\Models\RentalApplication;
+use App\Models\RentalInsurance;
+use App\Models\RenterPreference;
 use App\Models\Payment;
+use App\Models\WishList;
+use App\Models\MaintenanceRequest;
+use App\Models\SupportTicket;
+use App\Models\Review;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
@@ -19,64 +25,116 @@ class AIAssistantController extends Controller
     {
         $role = $user->role ?? 'user';
         $name = $user->first_name ?? 'User';
+        $email = $user->email ?? '';
 
         $basePrompt = <<<PROMPT
-You are Prelease AI, a friendly and knowledgeable assistant for Prelease Canada — a rental platform connecting landlords and tenants in Canada.
+You are Prelease AI, the intelligent assistant for the Prelease Canada rental platform. You have FULL ACCESS to real-time platform data. You can see all properties, applications, leases, payments, and user data. USE THIS DATA to give specific, actionable answers.
 
-Current user: {$name} (role: {$role})
+CURRENT USER: {$name} ({$email}), Role: {$role}
 
-YOUR ROLE:
-- Help users find properties that match their budget and needs
-- Explain the rental process step by step
-- Advise on lease types (3-month or 6-month)
-- Explain fees: support fee (\$100/month), commission (5% of total rent), insurance
-- Help landlords manage their properties and applications
-- Answer questions about the platform features
-- Always respond in the same language the user writes in (French or English)
+PLATFORM OVERVIEW:
+Prelease Canada connects landlords and tenants for short-term rentals (3 or 6 months) across Canada.
 
 RENTAL PROCESS:
-1. Tenant browses properties and submits an application
-2. Landlord reviews and approves/rejects the application
-3. If approved, landlord creates a lease agreement
-4. Both parties sign the lease (tenant first, then landlord)
-5. Tenant makes full upfront payment
-6. Lease becomes active, rental insurance is created automatically
+1. Tenant browses properties → submits application (cover letter, income, references)
+2. Landlord reviews → approves or rejects
+3. If approved → landlord creates a lease agreement (sets monthly rent)
+4. Tenant signs → then landlord signs → lease becomes ACTIVE
+5. Tenant makes full upfront payment → rental insurance auto-created
+6. Lease statuses: pending_renter_signature → pending_landlord_signature → active → terminated
 
-FEE STRUCTURE (for a lease):
-- Monthly rent × number of months = Total rent
-- Support fee: \$100/month × number of months
+FEE STRUCTURE:
+- Monthly rent × months = Total rent
+- Support fee: \$100/month × months
 - Commission: 5% of total rent
-- Insurance: determined later
-- Total = Rent + Support + Commission + Insurance
+- Insurance: TBD
+- Total payable = Rent + Support + Commission + Insurance
 
-Example: 3-month lease at \$1,500/month
-- Rent: \$4,500
-- Support: \$300
-- Commission: \$225
-- Total: \$5,025
-
-GUIDELINES:
-- Be concise but helpful
-- If the user asks about a specific property, use the context provided
-- Recommend properties based on budget: suggest properties where total cost fits their means
-- If you don't know something specific, say so honestly
-- Never make up property listings or prices
-- Always be encouraging and supportive
+CRITICAL INSTRUCTIONS:
+- You have REAL platform data below. Use it to answer specific questions about properties, prices, availability, applications, leases, payments.
+- When recommending properties, calculate the TOTAL cost (rent + fees) and compare to user's budget.
+- Give specific property names, prices, and locations — NEVER say "I cannot access the data".
+- If the user asks about their applications/leases/payments, give exact details from the data.
+- Always respond in the SAME LANGUAGE the user writes in (French or English).
+- Be concise, specific, and actionable.
+- Use property names and details when recommending.
+- If data is empty (no properties, no applications etc.), say so honestly and suggest next steps.
 PROMPT;
 
-        if (!empty($context['properties'])) {
-            $propList = collect($context['properties'])->map(function ($p) {
-                return "- {$p['title']} in {$p['city']}, {$p['state']}: \${$p['price']}/month, {$p['bedrooms']} bed, {$p['bathrooms']} bath";
-            })->join("\n");
-            $basePrompt .= "\n\nAVAILABLE PROPERTIES THE USER MIGHT BE INTERESTED IN:\n{$propList}";
+        // ══════════ PROPERTIES ══════════
+        if (!empty($context['all_properties'])) {
+            $basePrompt .= "\n\n═══ ALL AVAILABLE PROPERTIES ON THE PLATFORM ═══\n";
+            foreach ($context['all_properties'] as $p) {
+                $amenities = !empty($p['amenities']) ? implode(', ', array_column($p['amenities'], 'name')) : 'N/A';
+                $rating = $p['avg_rating'] ? number_format($p['avg_rating'], 1) . '/5' : 'No reviews';
+                $basePrompt .= "• [{$p['id']}] \"{$p['title']}\" — {$p['city']}, {$p['state']} | \${$p['set_your_price']}/month | {$p['how_many_bedrooms']} bed, {$p['how_many_bathroom']} bath | Type: {$p['describe_your_place']} | Guests: {$p['how_many_guests']} | Rating: {$rating} | Amenities: {$amenities}\n";
+            }
         }
 
-        if (!empty($context['applications_count'])) {
-            $basePrompt .= "\n\nUser has {$context['applications_count']} active application(s).";
+        // ══════════ USER'S PROPERTIES (landlord) ══════════
+        if (!empty($context['my_properties'])) {
+            $basePrompt .= "\n\n═══ YOUR PROPERTIES (as landlord) ═══\n";
+            foreach ($context['my_properties'] as $p) {
+                $basePrompt .= "• [{$p['id']}] \"{$p['title']}\" — {$p['city']}, {$p['state']} | \${$p['set_your_price']}/month | {$p['how_many_bedrooms']} bed, {$p['how_many_bathroom']} bath\n";
+            }
         }
 
-        if (!empty($context['leases_count'])) {
-            $basePrompt .= "\n\nUser has {$context['leases_count']} active lease(s).";
+        // ══════════ USER PREFERENCES ══════════
+        if (!empty($context['preferences'])) {
+            $pref = $context['preferences'];
+            $basePrompt .= "\n\n═══ YOUR SEARCH PREFERENCES ═══\n";
+            $basePrompt .= "City: " . ($pref['preferred_city'] ?? 'Any') . " | Budget: \${$pref['budget_min']} - \${$pref['budget_max']}/month | ";
+            $basePrompt .= "Type: " . ($pref['property_type'] ?? 'Any') . " | Min bedrooms: " . ($pref['min_bedrooms'] ?? 'Any') . " | ";
+            $basePrompt .= "Lease: " . ($pref['lease_duration'] ?? 'Any') . " | Pets: " . ($pref['pets_allowed'] ? 'Yes' : 'No') . "\n";
+        }
+
+        // ══════════ APPLICATIONS ══════════
+        if (!empty($context['applications'])) {
+            $basePrompt .= "\n\n═══ YOUR APPLICATIONS ═══\n";
+            foreach ($context['applications'] as $app) {
+                $propTitle = $app['property']['title'] ?? 'Property #' . $app['property_id'];
+                $basePrompt .= "• Application #{$app['id']} for \"{$propTitle}\" | Status: {$app['status']} | Income: \${$app['monthly_income']}/month | Move-in: {$app['desired_move_in']} | Duration: {$app['desired_lease_duration']}\n";
+            }
+        }
+
+        // ══════════ LEASES ══════════
+        if (!empty($context['leases'])) {
+            $basePrompt .= "\n\n═══ YOUR LEASES ═══\n";
+            foreach ($context['leases'] as $l) {
+                $propTitle = $l['property']['title'] ?? 'Property #' . $l['property_id'];
+                $basePrompt .= "• Lease #{$l['id']} for \"{$propTitle}\" | Status: {$l['status']} | \${$l['monthly_rent']}/month | Total: \${$l['total_payable']} | {$l['start_date']} → {$l['end_date']} | Type: {$l['lease_type']}\n";
+            }
+        }
+
+        // ══════════ PAYMENTS ══════════
+        if (!empty($context['payments'])) {
+            $basePrompt .= "\n\n═══ YOUR PAYMENTS ═══\n";
+            foreach ($context['payments'] as $pay) {
+                $basePrompt .= "• Payment {$pay['payment_reference']} | Status: {$pay['status']} | Total: \${$pay['total_amount']} | Method: {$pay['payment_method']} | Paid: " . ($pay['paid_at'] ?? 'Not yet') . "\n";
+            }
+        }
+
+        // ══════════ WISHLIST ══════════
+        if (!empty($context['wishlist'])) {
+            $basePrompt .= "\n\n═══ YOUR WISHLIST ═══\n";
+            foreach ($context['wishlist'] as $w) {
+                $propTitle = $w['property']['title'] ?? 'Property #' . $w['property_id'];
+                $basePrompt .= "• \"{$propTitle}\"\n";
+            }
+        }
+
+        // ══════════ MAINTENANCE REQUESTS ══════════
+        if (!empty($context['maintenance'])) {
+            $basePrompt .= "\n\n═══ YOUR MAINTENANCE REQUESTS ═══\n";
+            foreach ($context['maintenance'] as $m) {
+                $basePrompt .= "• #{$m['id']} | {$m['title']} | Status: {$m['status']} | Priority: {$m['priority']}\n";
+            }
+        }
+
+        // ══════════ PLATFORM STATS ══════════
+        if (!empty($context['stats'])) {
+            $basePrompt .= "\n\n═══ PLATFORM STATS ═══\n";
+            $basePrompt .= "Total properties: {$context['stats']['total_properties']} | Total active leases: {$context['stats']['active_leases']} | Average rent: \${$context['stats']['avg_rent']}/month\n";
         }
 
         return $basePrompt;
@@ -87,37 +145,108 @@ PROMPT;
         $context = [];
 
         try {
-            if (in_array($user->role, ['renter', 'Tenant', null])) {
-                $context['properties'] = Property::select('id', 'title', 'city', 'state', 'price', 'bedrooms', 'bathrooms', 'property_type')
-                    ->where('status', 'active')
+            $isRenter = in_array($user->role, ['renter', 'Tenant', null, '']);
+
+            // ── All available properties (for everyone) ──
+            $context['all_properties'] = Property::with(['amenities:id,name', 'reviews'])
+                ->select('id', 'title', 'city', 'state', 'set_your_price', 'how_many_bedrooms', 'how_many_bathroom', 'describe_your_place', 'how_many_guests', 'user_id')
+                ->orderBy('created_at', 'desc')
+                ->limit(50)
+                ->get()
+                ->map(function ($p) {
+                    $p->avg_rating = $p->reviews->avg('rating');
+                    unset($p->reviews);
+                    return $p;
+                })
+                ->toArray();
+
+            // ── Platform stats ──
+            $context['stats'] = [
+                'total_properties' => Property::count(),
+                'active_leases' => LeaseAgreement::where('status', 'active')->count(),
+                'avg_rent' => number_format(Property::avg('set_your_price') ?? 0, 2),
+            ];
+
+            if ($isRenter) {
+                // ── Renter preferences ──
+                $pref = RenterPreference::where('user_id', $user->id)->first();
+                if ($pref) {
+                    $context['preferences'] = $pref->toArray();
+                }
+
+                // ── Renter applications ──
+                $context['applications'] = RentalApplication::with('property:id,title,city,state,set_your_price')
+                    ->where('renter_id', $user->id)
+                    ->orderBy('created_at', 'desc')
+                    ->limit(20)
+                    ->get()
+                    ->toArray();
+
+                // ── Renter leases ──
+                $context['leases'] = LeaseAgreement::with('property:id,title,city,state')
+                    ->where('renter_id', $user->id)
                     ->orderBy('created_at', 'desc')
                     ->limit(10)
                     ->get()
                     ->toArray();
 
-                $context['applications_count'] = RentalApplication::where('renter_id', $user->id)
-                    ->whereIn('status', ['submitted', 'under_review', 'approved'])
-                    ->count();
+                // ── Renter payments ──
+                $context['payments'] = Payment::where('renter_id', $user->id)
+                    ->orderBy('created_at', 'desc')
+                    ->limit(10)
+                    ->get()
+                    ->toArray();
 
-                $context['leases_count'] = LeaseAgreement::where('renter_id', $user->id)
-                    ->where('status', 'active')
-                    ->count();
+                // ── Wishlist ──
+                $context['wishlist'] = WishList::with('property:id,title,city,state,set_your_price')
+                    ->where('user_id', $user->id)
+                    ->get()
+                    ->toArray();
+
+                // ── Maintenance ──
+                $context['maintenance'] = MaintenanceRequest::where('tenant_id', $user->id)
+                    ->orderBy('created_at', 'desc')
+                    ->limit(10)
+                    ->get()
+                    ->toArray();
+
             } else {
-                $context['properties'] = Property::select('id', 'title', 'city', 'state', 'price', 'bedrooms', 'bathrooms', 'property_type')
+                // ── Landlord's own properties ──
+                $context['my_properties'] = Property::select('id', 'title', 'city', 'state', 'set_your_price', 'how_many_bedrooms', 'how_many_bathroom')
                     ->where('user_id', $user->id)
                     ->orderBy('created_at', 'desc')
+                    ->get()
+                    ->toArray();
+
+                // ── Applications received ──
+                $context['applications'] = RentalApplication::with(['property:id,title', 'renter:id,first_name,last_name,email'])
+                    ->where('landlord_id', $user->id)
+                    ->orderBy('created_at', 'desc')
+                    ->limit(20)
+                    ->get()
+                    ->toArray();
+
+                // ── Landlord leases ──
+                $context['leases'] = LeaseAgreement::with('property:id,title,city,state')
+                    ->where('landlord_id', $user->id)
+                    ->orderBy('created_at', 'desc')
                     ->limit(10)
                     ->get()
                     ->toArray();
 
-                $pendingApps = RentalApplication::where('landlord_id', $user->id)
-                    ->whereIn('status', ['submitted', 'under_review'])
-                    ->count();
-                $context['applications_count'] = $pendingApps;
+                // ── Landlord payments received ──
+                $context['payments'] = Payment::where('landlord_id', $user->id)
+                    ->orderBy('created_at', 'desc')
+                    ->limit(10)
+                    ->get()
+                    ->toArray();
 
-                $context['leases_count'] = LeaseAgreement::where('landlord_id', $user->id)
-                    ->where('status', 'active')
-                    ->count();
+                // ── Maintenance for landlord ──
+                $context['maintenance'] = MaintenanceRequest::where('landlord_id', $user->id)
+                    ->orderBy('created_at', 'desc')
+                    ->limit(10)
+                    ->get()
+                    ->toArray();
             }
         } catch (\Throwable $e) {
             Log::warning('AI context fetch error: ' . $e->getMessage());
@@ -156,7 +285,7 @@ PROMPT;
             // Build Gemini contents array
             $contents = [];
 
-            // Add conversation history (last 10 exchanges max)
+            // Add conversation history (last 20 messages max)
             $history = $request->conversation ?? [];
             $history = array_slice($history, -20);
             foreach ($history as $msg) {
@@ -177,7 +306,7 @@ PROMPT;
             $model = config('services.gemini.model', 'gemini-2.5-flash');
             $response = Http::withHeaders([
                 'Content-Type' => 'application/json',
-            ])->timeout(30)->post(
+            ])->timeout(60)->post(
                 "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
                 [
                     'system_instruction' => [
@@ -185,7 +314,7 @@ PROMPT;
                     ],
                     'contents' => $contents,
                     'generationConfig' => [
-                        'maxOutputTokens' => 800,
+                        'maxOutputTokens' => 1200,
                         'temperature' => 0.7,
                     ],
                 ]
@@ -218,27 +347,43 @@ PROMPT;
             }
 
             $role = $user->role;
-            $suggestions = [];
+            $isRenter = in_array($role, ['renter', 'Tenant', null, '']);
 
-            if (in_array($role, ['renter', 'Tenant', null])) {
-                $suggestions = [
-                    'What properties are available within my budget?',
-                    'How does the rental process work?',
-                    'Explain the fees and costs',
-                    'Help me find a 2-bedroom apartment',
-                    'What documents do I need to apply?',
-                ];
+            if ($isRenter) {
+                $appCount = RentalApplication::where('renter_id', $user->id)->count();
+                $leaseCount = LeaseAgreement::where('renter_id', $user->id)->count();
+                $propCount = Property::count();
+
+                $suggestions = [];
+                if ($propCount > 0) {
+                    $suggestions[] = "Show me all available properties";
+                    $suggestions[] = "Find me something under \$1500/month";
+                }
+                $suggestions[] = "How does the rental process work?";
+                if ($appCount > 0) {
+                    $suggestions[] = "What's the status of my applications?";
+                }
+                if ($leaseCount > 0) {
+                    $suggestions[] = "Show me my lease details";
+                }
+                $suggestions[] = "Calculate total cost for a 3-month lease";
             } else {
-                $suggestions = [
-                    'How do I list a new property?',
-                    'I have pending applications, what should I do?',
-                    'How do lease agreements work?',
-                    'Explain the commission structure',
-                    'How do I manage my properties?',
-                ];
+                $appCount = RentalApplication::where('landlord_id', $user->id)->whereIn('status', ['submitted', 'under_review'])->count();
+                $propCount = Property::where('user_id', $user->id)->count();
+
+                $suggestions = [];
+                if ($propCount > 0) {
+                    $suggestions[] = "Show me my properties";
+                }
+                if ($appCount > 0) {
+                    $suggestions[] = "I have {$appCount} pending application(s)";
+                }
+                $suggestions[] = "How do lease agreements work?";
+                $suggestions[] = "Explain the commission structure";
+                $suggestions[] = "How do I list a new property?";
             }
 
-            return response()->json(['status' => 200, 'suggestions' => $suggestions]);
+            return response()->json(['status' => 200, 'suggestions' => array_slice($suggestions, 0, 5)]);
         } catch (\Throwable $th) {
             return response()->json(['error' => $th->getMessage()], 500);
         }
