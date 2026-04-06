@@ -41,6 +41,7 @@ class MaintenanceRequestController extends Controller
                 'description' => 'required|string',
                 'category' => 'required|in:plumbing,electrical,appliance,structural,pest,general',
                 'priority' => 'required|in:low,medium,high,urgent',
+                'photos.*' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:5120',
             ]);
 
             if ($validator->fails()) {
@@ -48,6 +49,15 @@ class MaintenanceRequestController extends Controller
             }
 
             $user = Auth::user();
+
+            $photoPaths = [];
+            if ($request->hasFile('photos')) {
+                foreach ($request->file('photos') as $photo) {
+                    $fileName = 'maintenance/' . uniqid() . '_' . time() . '.' . $photo->getClientOriginalExtension();
+                    $photo->storeAs('', $fileName, 's3');
+                    $photoPaths[] = $fileName;
+                }
+            }
 
             $maintenanceRequest = MaintenanceRequest::create([
                 'tenant_id' => $user->id,
@@ -58,6 +68,7 @@ class MaintenanceRequestController extends Controller
                 'description' => $request->description,
                 'category' => $request->category,
                 'priority' => $request->priority,
+                'photos' => count($photoPaths) > 0 ? $photoPaths : null,
             ]);
 
             // Notify landlord

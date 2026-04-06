@@ -19,12 +19,14 @@ class MaintenanceRequest extends Model
         'category',
         'priority',
         'status',
+        'photos',
         'landlord_response',
         'resolved_at',
     ];
 
     protected $casts = [
         'resolved_at' => 'datetime',
+        'photos' => 'array',
     ];
 
     public function tenant()
