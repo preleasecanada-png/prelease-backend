@@ -50,10 +50,34 @@ FEE STRUCTURE:
 - Insurance: TBD
 - Total payable = Rent + Support + Commission + Insurance
 
+DIRECT LINKS — You MUST include clickable links when mentioning any page or property:
+- Property detail: {$context['base_url']}/property-detail/{slug}/{id}
+- All properties: {$context['base_url']}/property-lists
+- My applications: {$context['base_url']}/applications
+- My leases: {$context['base_url']}/leases
+- My payments: {$context['base_url']}/payments
+- Payment checkout: {$context['base_url']}/payment-checkout
+- Wish list: {$context['base_url']}/wish-lists
+- Preferences: {$context['base_url']}/preferences
+- Find home: {$context['base_url']}/find-home
+- Apply to property: {$context['base_url']}/apply?property_id={id}
+- My properties (host): {$context['base_url']}/my-properties
+- Create property (host): {$context['base_url']}/properties
+- Notifications: {$context['base_url']}/notifications
+- Insurance: {$context['base_url']}/insurance
+- Maintenance: {$context['base_url']}/maintenance
+- Support: {$context['base_url']}/support
+- Reviews: {$context['base_url']}/reviews
+- Account: {$context['base_url']}/account
+- Verification: {$context['base_url']}/user-verification
+
+FORMAT LINKS AS MARKDOWN: [Link text](url) — for example: [View property](https://dev.preleasecanada.ca/property-detail/my-apartment/5)
+
 CRITICAL INSTRUCTIONS:
 - You have REAL platform data below. Use it to answer specific questions about properties, prices, availability, applications, leases, payments.
 - When recommending properties, calculate the TOTAL cost (rent + fees) and compare to user's budget.
 - Give specific property names, prices, and locations — NEVER say "I cannot access the data".
+- ALWAYS include direct links when mentioning properties, pages, or actions the user can take.
 - If the user asks about their applications/leases/payments, give exact details from the data.
 - Always respond in the SAME LANGUAGE the user writes in (French or English).
 - Be concise, specific, and actionable.
@@ -61,13 +85,17 @@ CRITICAL INSTRUCTIONS:
 - If data is empty (no properties, no applications etc.), say so honestly and suggest next steps.
 PROMPT;
 
+        $baseUrl = $context['base_url'] ?? '';
+
         // ══════════ PROPERTIES ══════════
         if (!empty($context['all_properties'])) {
             $basePrompt .= "\n\n═══ ALL AVAILABLE PROPERTIES ON THE PLATFORM ═══\n";
             foreach ($context['all_properties'] as $p) {
                 $amenities = !empty($p['amenities']) ? implode(', ', array_column($p['amenities'], 'name')) : 'N/A';
                 $rating = $p['avg_rating'] ? number_format($p['avg_rating'], 1) . '/5' : 'No reviews';
-                $basePrompt .= "• [{$p['id']}] \"{$p['title']}\" — {$p['city']}, {$p['state']} | \${$p['set_your_price']}/month | {$p['how_many_bedrooms']} bed, {$p['how_many_bathroom']} bath | Type: {$p['describe_your_place']} | Guests: {$p['how_many_guests']} | Rating: {$rating} | Amenities: {$amenities}\n";
+                $slug = $p['slug'] ?? 'property';
+                $url = "{$baseUrl}/property-detail/{$slug}/{$p['id']}";
+                $basePrompt .= "• \"{$p['title']}\" — {$p['city']}, {$p['state']} | \${$p['set_your_price']}/month | {$p['how_many_bedrooms']} bed, {$p['how_many_bathroom']} bath | Type: {$p['describe_your_place']} | Guests: {$p['how_many_guests']} | Rating: {$rating} | Amenities: {$amenities} | Link: {$url}\n";
             }
         }
 
@@ -75,7 +103,9 @@ PROMPT;
         if (!empty($context['my_properties'])) {
             $basePrompt .= "\n\n═══ YOUR PROPERTIES (as landlord) ═══\n";
             foreach ($context['my_properties'] as $p) {
-                $basePrompt .= "• [{$p['id']}] \"{$p['title']}\" — {$p['city']}, {$p['state']} | \${$p['set_your_price']}/month | {$p['how_many_bedrooms']} bed, {$p['how_many_bathroom']} bath\n";
+                $slug = $p['slug'] ?? 'property';
+                $url = "{$baseUrl}/property-detail/{$slug}/{$p['id']}";
+                $basePrompt .= "• \"{$p['title']}\" — {$p['city']}, {$p['state']} | \${$p['set_your_price']}/month | {$p['how_many_bedrooms']} bed, {$p['how_many_bathroom']} bath | Link: {$url}\n";
             }
         }
 
@@ -147,9 +177,12 @@ PROMPT;
         try {
             $isRenter = in_array($user->role, ['renter', 'Tenant', null, '']);
 
+            // ── Frontend base URL ──
+            $context['base_url'] = config('app.frontend_url', env('FRONTEND_URL', 'https://dev.preleasecanada.ca'));
+
             // ── All available properties (for everyone) ──
             $context['all_properties'] = Property::with(['amenities:id,name', 'reviews'])
-                ->select('id', 'title', 'city', 'state', 'set_your_price', 'how_many_bedrooms', 'how_many_bathroom', 'describe_your_place', 'how_many_guests', 'user_id')
+                ->select('id', 'title', 'slug', 'city', 'state', 'set_your_price', 'how_many_bedrooms', 'how_many_bathroom', 'describe_your_place', 'how_many_guests', 'user_id')
                 ->orderBy('created_at', 'desc')
                 ->limit(50)
                 ->get()
@@ -212,7 +245,7 @@ PROMPT;
 
             } else {
                 // ── Landlord's own properties ──
-                $context['my_properties'] = Property::select('id', 'title', 'city', 'state', 'set_your_price', 'how_many_bedrooms', 'how_many_bathroom')
+                $context['my_properties'] = Property::select('id', 'title', 'slug', 'city', 'state', 'set_your_price', 'how_many_bedrooms', 'how_many_bathroom')
                     ->where('user_id', $user->id)
                     ->orderBy('created_at', 'desc')
                     ->get()
