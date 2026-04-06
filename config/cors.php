@@ -22,6 +22,9 @@ return [
     'allowed_origins' => array_filter([
         env('FRONTEND_URL', 'http://localhost:3000'),
         'http://localhost:3000',
+        'https://www.preleasecanada.ca',
+        'https://preleasecanada.ca',
+        'https://dev.preleasecanada.ca',
     ]),
 
     'allowed_origins_patterns' => [

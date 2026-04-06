@@ -39,7 +39,7 @@ class UserChatController extends Controller
             }
         }
         $user  = $userChat;
-        broadcast(new ChatEvent($user))->toOthers();
+        try { broadcast(new ChatEvent($user))->toOthers(); } catch (\Throwable $e) { \Log::warning('Broadcast failed: '.$e->getMessage()); }
         return response()->json(['status' => 200, 'message' => 'User message send successfully!', 'data' => $userChat]);
     }
 
@@ -67,7 +67,7 @@ class UserChatController extends Controller
             $userChat->type = 'text';
             $userChat->save();
 
-            broadcast(new ChatEvent($userChat))->toOthers();
+            try { broadcast(new ChatEvent($userChat))->toOthers(); } catch (\Throwable $e) { \Log::warning('Broadcast failed: '.$e->getMessage()); }
 
             return response()->json([
                 'status' => 200,
@@ -146,7 +146,7 @@ class UserChatController extends Controller
                     'type'        => 'reservation_request',
                 ]);
 
-                broadcast(new ChatEvent($chat))->toOthers();
+                try { broadcast(new ChatEvent($chat))->toOthers(); } catch (\Throwable $e) { \Log::warning('Broadcast failed: '.$e->getMessage()); }
             }
 
             return response()->json([
@@ -217,6 +217,77 @@ class UserChatController extends Controller
     //         'data' => $userChat
     //     ]);
     // }
+    /**
+     * Get unread message count for the authenticated user
+     */
+    public function unreadCount()
+    {
+        $count = UserChat::where('received_id', Auth::id())
+            ->whereNull('read_at')
+            ->count();
+
+        return response()->json(['status' => 200, 'count' => $count]);
+    }
+
+    /**
+     * Mark messages from a specific user as read
+     */
+    public function markRead(Request $request)
+    {
+        $peerId = $request->user_id;
+        UserChat::where('sender_id', $peerId)
+            ->where('received_id', Auth::id())
+            ->whereNull('read_at')
+            ->update(['read_at' => now()]);
+
+        return response()->json(['status' => 200, 'message' => 'Messages marked as read']);
+    }
+
+    /**
+     * Get conversations list with last message and unread count per conversation
+     */
+    public function conversations()
+    {
+        $me = Auth::id();
+
+        // Get all distinct users I've chatted with
+        $senderIds = UserChat::where('received_id', $me)->distinct()->pluck('sender_id');
+        $receiverIds = UserChat::where('sender_id', $me)->distinct()->pluck('received_id');
+        $peerIds = $senderIds->merge($receiverIds)->unique()->values();
+
+        $conversations = [];
+        foreach ($peerIds as $peerId) {
+            $lastMessage = UserChat::where(function ($q) use ($me, $peerId) {
+                $q->where('sender_id', $me)->where('received_id', $peerId);
+            })->orWhere(function ($q) use ($me, $peerId) {
+                $q->where('sender_id', $peerId)->where('received_id', $me);
+            })->orderBy('created_at', 'desc')->first();
+
+            $unread = UserChat::where('sender_id', $peerId)
+                ->where('received_id', $me)
+                ->whereNull('read_at')
+                ->count();
+
+            $user = User::select('id', 'first_name', 'last_name', 'email', 'picture', 'role')
+                ->find($peerId);
+
+            if ($user && $lastMessage) {
+                $conversations[] = [
+                    'user' => $user,
+                    'last_message' => $lastMessage,
+                    'unread_count' => $unread,
+                ];
+            }
+        }
+
+        // Sort by last message date descending
+        usort($conversations, function ($a, $b) {
+            return strtotime($b['last_message']['created_at']) - strtotime($a['last_message']['created_at']);
+        });
+
+        return response()->json(['status' => 200, 'data' => $conversations]);
+    }
+
     protected function users()
     {
         try {

@@ -32,10 +32,13 @@ class User extends Authenticatable
         'date_of_birth',
         'email_verified_at',
         'google_id',
+        'facebook_id',
+        'apple_id',
         'verify_status',
         'role',
         'bio',
-        'gender'
+        'gender',
+        'picture'
     ];
 
     /**

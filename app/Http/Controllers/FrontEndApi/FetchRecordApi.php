@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Amenties;
 use App\Models\City;
 use App\Models\Place;
+use App\Models\Property;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -45,8 +46,23 @@ class FetchRecordApi extends Controller
     protected function destinationPlace($slug)
     {
         try {
-            $destinationPlace = City::with(['places.placeImages'])->where('slug', $slug)->first();
-            return response()->json(['destinationPlace' => $destinationPlace, 'messsage' => 'Destination place Fetch Records.', 'status' => 200]);
+            // Convert slug back to city name (e.g. "quebec" -> "Quebec", "toronto" -> "Toronto")
+            $cityName = str_replace('-', ' ', $slug);
+            
+            $properties = Property::with(['propertyImages', 'user', 'amenities'])
+                ->whereRaw('LOWER(city) = ?', [strtolower($cityName)])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'destinationPlace' => [
+                    'name' => ucwords($cityName),
+                    'slug' => $slug,
+                    'places' => $properties,
+                ],
+                'messsage' => 'Destination place Fetch Records.',
+                'status' => 200,
+            ]);
         } catch (\Throwable $th) {
             return response()->json(['error' => $th->getMessage()], 422);
         }

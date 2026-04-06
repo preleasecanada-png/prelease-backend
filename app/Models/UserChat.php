@@ -12,5 +12,9 @@ class UserChat extends Model
 
     protected $table = 'user_chats';
 
-    protected $fillable = ['sender_id', 'received_id', 'message','type'];
+    protected $fillable = ['sender_id', 'received_id', 'message', 'type', 'read_at'];
+
+    protected $casts = [
+        'read_at' => 'datetime',
+    ];
 }

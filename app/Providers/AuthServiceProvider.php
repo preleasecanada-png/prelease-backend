@@ -22,6 +22,12 @@ class AuthServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->registerPolicies();
+
+        // On Lambda, storage_path() points to /tmp/storage but keys are in /var/task/storage
+        if (isset($_SERVER['LAMBDA_TASK_ROOT'])) {
+            Passport::loadKeysFrom($_SERVER['LAMBDA_TASK_ROOT'] . '/storage');
+        }
+
         // Set token expiration to 1 days
         // Passport::tokensExpireIn(now()->addDays(1));
     }

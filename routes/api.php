@@ -17,6 +17,12 @@ use App\Http\Controllers\FrontEndApi\RentalInsuranceController;
 use App\Http\Controllers\FrontEndApi\NotificationController;
 use App\Http\Controllers\FrontEndApi\MaintenanceRequestController;
 use App\Http\Controllers\FrontEndApi\DashboardController;
+use App\Http\Controllers\FrontEndApi\AdminController;
+use App\Http\Controllers\AdminApplicationController;
+use App\Http\Controllers\AdminPaymentController;
+use App\Http\Controllers\AdminReferralController;
+use App\Http\Controllers\AdminSupportController;
+use App\Http\Controllers\AdminVerificationController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Broadcast;
@@ -46,6 +52,8 @@ Route::post('token-save', [AuthApiController::class, 'token_save']);
 Route::post('forgot-password', [AuthApiController::class, 'forgotPassword']);
 Route::post('reset-password', [AuthApiController::class, 'resetPassword']);
 Route::post('/google-login', [AuthApiController::class, 'googleLogin']);
+Route::post('/facebook-login', [AuthApiController::class, 'facebookLogin']);
+Route::post('/apple-login', [AuthApiController::class, 'appleLogin']);
 
 
 Route::get('cities', [FetchRecordApi::class, 'cities']);
@@ -75,6 +83,9 @@ Route::middleware('auth:api')->group(function () {
     Route::post('reserve', [UserChatController::class, 'reserve']);
     Route::get('chats', [UserChatController::class, 'getChats']);
     Route::post('send-message', [UserChatController::class, 'send_message']);
+    Route::get('chats/unread-count', [UserChatController::class, 'unreadCount']);
+    Route::post('chats/mark-read', [UserChatController::class, 'markRead']);
+    Route::get('chats/conversations', [UserChatController::class, 'conversations']);
     Route::get('user-detail/{id}', [UserChatController::class, 'user_detail']);
     Route::post('profile-update', [AuthApiController::class, 'profile_update']);
 
@@ -181,3 +192,54 @@ Route::prefix('property')->controller(PropertyController::class)->group(function
 Route::get('property-detail/{slug}/{id}', [PropertyController::class, 'property_detail']);
 Route::get('reviews/property/{propertyId}', [ReviewController::class, 'propertyReviews']);
 Route::get('reviews/user/{userId}', [ReviewController::class, 'userReviews']);
+
+// Admin routes
+Route::middleware(['auth:api', 'admin'])->prefix('admin')->group(function () {
+    // Core admin (stats, users, properties)
+    Route::controller(AdminController::class)->group(function () {
+        Route::get('stats', 'stats');
+        Route::get('users', 'users');
+        Route::get('users/{id}', 'userDetail');
+        Route::post('users/{id}/role', 'updateUserRole');
+        Route::delete('users/{id}', 'deleteUser');
+        Route::get('properties', 'properties');
+        Route::delete('properties/{id}', 'deleteProperty');
+    });
+
+    // Applications management
+    Route::prefix('applications')->controller(AdminApplicationController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::get('/{id}', 'show');
+        Route::post('/documents/{id}/verify', 'verifyDocument');
+    });
+
+    // Payments management
+    Route::prefix('payments')->controller(AdminPaymentController::class)->group(function () {
+        Route::get('/dashboard', 'dashboard');
+        Route::get('/', 'index');
+        Route::get('/{id}', 'show');
+        Route::post('/{id}/landlord-payout', 'processLandlordPayout');
+        Route::post('/{id}/insurance-payout', 'processInsurancePayout');
+    });
+
+    // Referrals management
+    Route::prefix('referrals')->controller(AdminReferralController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::post('/{id}/complete', 'markCompleted');
+        Route::post('/{id}/pay', 'processPayment');
+    });
+
+    // Support tickets management
+    Route::prefix('support')->controller(AdminSupportController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::get('/{id}', 'show');
+        Route::post('/{id}/respond', 'respond');
+    });
+
+    // Verifications management
+    Route::prefix('verifications')->controller(AdminVerificationController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::get('/{id}', 'show');
+        Route::post('/{id}/status', 'updateStatus');
+    });
+});

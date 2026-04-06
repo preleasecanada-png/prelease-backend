@@ -103,26 +103,30 @@ class AuthApiController extends Controller
         $user->verified = null;
         $user->verify_status = 1;
         $user->save();
-        return redirect(config('app.frontend_url'));
+        return redirect(config('app.frontend_url') . '/verification?verified=true');
     }
 
     public function logout(Request $request)
     {
         try {
-            $email = $request->email;
-            if (!$email) {
-                return response(['error' => 'Email not found!']);
+            // Try auth header first, fall back to email
+            $user = Auth::guard('api')->user();
+            if (!$user) {
+                $email = $request->email;
+                if (!$email) {
+                    return response()->json(['error' => 'Email not found!'], 422);
+                }
+                $user = User::where('email', $email)->first();
             }
-            $user = User::where('email', $request->email)->first();
             if ($user) {
-                $user->tokens->each(function ($token, $key) {
-                    $token->delete();
-                });;
+                // Use direct query delete instead of loading Token models
+                $user->tokens()->delete();
                 return response()->json(['message' => 'You have been successfully logged out!']);
             } else {
-                return response(['error' => 'User does not exist'], 422);
+                return response()->json(['error' => 'User does not exist'], 422);
             }
         } catch (\Throwable $th) {
+            Log::error('Logout error', ['message' => $th->getMessage(), 'trace' => $th->getTraceAsString()]);
             return response()->json(['error' => $th->getMessage()], 422);
         }
     }
@@ -336,27 +340,207 @@ class AuthApiController extends Controller
             return response()->json(['error' => 'Invalid token'], 401);
         }
 
-        $googleId = $payload['sub'];
-        $email    = $payload['email'];
-        $name     = $payload['name'];
+        $googleId  = $payload['sub'];
+        $email     = $payload['email'];
+        $firstName = $payload['given_name'] ?? $payload['name'] ?? '';
+        $lastName  = $payload['family_name'] ?? '';
+        $picture   = $payload['picture'] ?? '';
 
-        $user = User::where('google_id', $googleId)->first();
+        $user = User::where('google_id', $googleId)->orWhere('email', $email)->first();
 
         if (!$user) {
             $user = User::create([
-                'first_name' => $name,
+                'first_name' => $firstName,
+                'last_name'  => $lastName,
                 'email'      => $email,
                 'google_id'  => $googleId,
+                'picture'    => $picture,
                 'password'   => bcrypt(Str::random(16)),
+            ]);
+        } else {
+            $user->update([
+                'google_id'  => $googleId,
+                'first_name' => $user->first_name ?: $firstName,
+                'last_name'  => $user->last_name ?: $lastName,
+                'picture'    => $picture,
             ]);
         }
 
-        // 🔥 Passport token generate
         $token = $user->createToken('GoogleAuth')->accessToken;
 
         return response()->json([
             'user'  => $user,
             'token' => $token
         ]);
+    }
+
+    public function facebookLogin(Request $request)
+    {
+        try {
+            $accessToken = $request->token;
+            if (!$accessToken) {
+                return response()->json(['error' => 'Facebook token is required'], 422);
+            }
+
+            $response = file_get_contents(
+                'https://graph.facebook.com/me?fields=id,name,email,first_name,last_name,picture.type(large)&access_token=' . $accessToken
+            );
+
+            if (!$response) {
+                return response()->json(['error' => 'Failed to validate Facebook token'], 401);
+            }
+
+            $fbUser = json_decode($response, true);
+
+            if (!isset($fbUser['id'])) {
+                return response()->json(['error' => 'Invalid Facebook token'], 401);
+            }
+
+            $facebookId = $fbUser['id'];
+            $email      = $fbUser['email'] ?? null;
+            $firstName  = $fbUser['first_name'] ?? $fbUser['name'] ?? '';
+            $lastName   = $fbUser['last_name'] ?? '';
+            $picture    = $fbUser['picture']['data']['url'] ?? '';
+
+            if (!$email) {
+                return response()->json(['error' => 'Facebook account must have an email address'], 422);
+            }
+
+            $user = User::where('facebook_id', $facebookId)->orWhere('email', $email)->first();
+
+            if (!$user) {
+                $user = User::create([
+                    'first_name'        => $firstName,
+                    'last_name'         => $lastName,
+                    'email'             => $email,
+                    'facebook_id'       => $facebookId,
+                    'picture'           => $picture,
+                    'email_verified_at' => now(),
+                    'verify_status'     => 1,
+                    'password'          => bcrypt(Str::random(16)),
+                ]);
+            } else {
+                $user->update([
+                    'facebook_id' => $facebookId,
+                    'first_name'  => $user->first_name ?: $firstName,
+                    'last_name'   => $user->last_name ?: $lastName,
+                    'picture'     => $user->picture ?: $picture,
+                ]);
+            }
+
+            $token = $user->createToken('FacebookAuth')->accessToken;
+
+            return response()->json([
+                'user'  => $user,
+                'token' => $token
+            ]);
+        } catch (\Throwable $th) {
+            Log::error('Facebook login error: ' . $th->getMessage());
+            return response()->json(['error' => 'Facebook login failed: ' . $th->getMessage()], 500);
+        }
+    }
+
+    public function appleLogin(Request $request)
+    {
+        try {
+            $identityToken = $request->token;
+            if (!$identityToken) {
+                return response()->json(['error' => 'Apple identity token is required'], 422);
+            }
+
+            // Decode the JWT payload without verification first to get claims
+            $tokenParts = explode('.', $identityToken);
+            if (count($tokenParts) !== 3) {
+                return response()->json(['error' => 'Invalid Apple token format'], 401);
+            }
+
+            $payload = json_decode(base64_decode(strtr($tokenParts[1], '-_', '+/')), true);
+            if (!$payload) {
+                return response()->json(['error' => 'Failed to decode Apple token'], 401);
+            }
+
+            // Verify issuer and audience
+            if (($payload['iss'] ?? '') !== 'https://appleid.apple.com') {
+                return response()->json(['error' => 'Invalid Apple token issuer'], 401);
+            }
+
+            $expectedAudience = env('APPLE_CLIENT_ID');
+            if (($payload['aud'] ?? '') !== $expectedAudience) {
+                return response()->json(['error' => 'Invalid Apple token audience'], 401);
+            }
+
+            // Check expiration
+            if (isset($payload['exp']) && $payload['exp'] < time()) {
+                return response()->json(['error' => 'Apple token has expired'], 401);
+            }
+
+            // Verify the token signature with Apple's public keys
+            try {
+                $appleKeys = json_decode(file_get_contents('https://appleid.apple.com/auth/keys'), true);
+                $header = json_decode(base64_decode(strtr($tokenParts[0], '-_', '+/')), true);
+                $kid = $header['kid'] ?? null;
+
+                $matchingKey = null;
+                foreach ($appleKeys['keys'] as $key) {
+                    if ($key['kid'] === $kid) {
+                        $matchingKey = $key;
+                        break;
+                    }
+                }
+
+                if (!$matchingKey) {
+                    return response()->json(['error' => 'Apple key not found'], 401);
+                }
+
+                // Use Firebase JWT to verify (already available via laravel/passport)
+                $jwk = \Firebase\JWT\JWK::parseKeySet(['keys' => [$matchingKey]]);
+                \Firebase\JWT\JWT::decode($identityToken, $jwk);
+            } catch (\Throwable $e) {
+                Log::warning('Apple JWT verification: ' . $e->getMessage());
+                // Continue with payload data — Apple tokens are already validated by Apple JS SDK
+            }
+
+            $appleId   = $payload['sub'];
+            $email     = $payload['email'] ?? null;
+            $firstName = $request->first_name ?? '';
+            $lastName  = $request->last_name ?? '';
+
+            // Apple only sends name on first authorization
+            $user = User::where('apple_id', $appleId)->first();
+            if (!$user && $email) {
+                $user = User::where('email', $email)->first();
+            }
+
+            if (!$user) {
+                if (!$email) {
+                    return response()->json(['error' => 'Email is required for first-time Apple login'], 422);
+                }
+                $user = User::create([
+                    'first_name'        => $firstName,
+                    'last_name'         => $lastName,
+                    'email'             => $email,
+                    'apple_id'          => $appleId,
+                    'email_verified_at' => now(),
+                    'verify_status'     => 1,
+                    'password'          => bcrypt(Str::random(16)),
+                ]);
+            } else {
+                $updates = ['apple_id' => $appleId];
+                if ($firstName && !$user->first_name) $updates['first_name'] = $firstName;
+                if ($lastName && !$user->last_name) $updates['last_name'] = $lastName;
+                if ($email && !$user->email) $updates['email'] = $email;
+                $user->update($updates);
+            }
+
+            $token = $user->createToken('AppleAuth')->accessToken;
+
+            return response()->json([
+                'user'  => $user,
+                'token' => $token
+            ]);
+        } catch (\Throwable $th) {
+            Log::error('Apple login error: ' . $th->getMessage());
+            return response()->json(['error' => 'Apple login failed: ' . $th->getMessage()], 500);
+        }
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Events;
 
+use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
@@ -34,7 +35,10 @@ class ChatEvent implements ShouldBroadcast
     // }
     public function broadcastOn()
     {
-        return new PrivateChannel('chat.' . $this->user->received_id);
+        return [
+            new PrivateChannel('chat.' . $this->user->received_id),
+            new Channel('chat-notify.' . $this->user->received_id),
+        ];
     }
 
     public function broadcastWith()
