@@ -339,11 +339,19 @@ class PropertyController extends Controller
                 $hostReviewStats['hosting_months'] = $hostingSince ? (int) $hostingSince->diffInMonths(now()) : 0;
             }
 
+            $bookedDates = \App\Models\Booking::where('property_id', $placeDetail->id)
+                ->whereIn('status', ['pending', 'payment_pending', 'paid'])
+                ->where('move_out_date', '>=', now()->format('Y-m-d'))
+                ->select('move_in_date', 'move_out_date')
+                ->get()
+                ->toArray();
+
             return response()->json([
                 'placeDetail' => $placeDetail,
                 'amenities' => $amenities,
                 'host_verification' => $hostVerification,
                 'host_review_stats' => $hostReviewStats,
+                'booked_dates' => $bookedDates,
                 'messsage' => 'Place detail Fetch Records.',
                 'status' => 200,
             ]);
