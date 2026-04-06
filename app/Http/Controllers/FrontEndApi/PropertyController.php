@@ -222,6 +222,12 @@ class PropertyController extends Controller
 
             $properties = $query->get();
 
+            $properties->each(function ($property) {
+                $reviews = \App\Models\Review::where('property_id', $property->id)->get();
+                $property->review_count = $reviews->count();
+                $property->avg_rating = $reviews->count() > 0 ? round($reviews->avg('overall_rating'), 1) : null;
+            });
+
             return response()->json([
                 'status' => 200,
                 'data' => $properties
@@ -309,7 +315,38 @@ class PropertyController extends Controller
             // $placeDetail = Property::with(['propertyImages', 'amenities' , 'user'])->where('slug', $slug)->where('id', $id)->first();
             $amenities_id = explode(',', $placeDetail->amenities_id);
             $amenities = Amenties::whereIn('id', $amenities_id)->get();
-            return response()->json(['placeDetail' => $placeDetail, 'amenities' =>  $amenities, 'messsage' => 'Place detail Fetch Records.', 'status' => 200]);
+
+            $hostVerification = [];
+            $hostReviewStats = [];
+            if ($placeDetail && $placeDetail->user) {
+                $hostId = $placeDetail->user->id;
+                $verifications = \App\Models\UserVerification::where('user_id', $hostId)->get();
+                $types = ['identity', 'income', 'address', 'landlord_ownership'];
+                foreach ($types as $type) {
+                    $v = $verifications->where('verification_type', $type)->first();
+                    $hostVerification[$type] = $v ? $v->status : 'not_submitted';
+                }
+                $hostVerification['is_fully_verified'] = collect($hostVerification)->every(fn($s) => $s === 'verified');
+
+                $reviews = \App\Models\Review::where('reviewee_id', $hostId)->get();
+                $hostReviewStats = [
+                    'total_reviews' => $reviews->count(),
+                    'avg_rating' => $reviews->count() > 0 ? round($reviews->avg('overall_rating'), 1) : 0,
+                ];
+
+                $hostingSince = $placeDetail->user->created_at;
+                $hostReviewStats['hosting_since'] = $hostingSince ? $hostingSince->format('M Y') : null;
+                $hostReviewStats['hosting_months'] = $hostingSince ? (int) $hostingSince->diffInMonths(now()) : 0;
+            }
+
+            return response()->json([
+                'placeDetail' => $placeDetail,
+                'amenities' => $amenities,
+                'host_verification' => $hostVerification,
+                'host_review_stats' => $hostReviewStats,
+                'messsage' => 'Place detail Fetch Records.',
+                'status' => 200,
+            ]);
         } catch (\Throwable $th) {
             return response()->json(['error' => $th->getMessage()], 422);
         }
