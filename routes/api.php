@@ -87,6 +87,9 @@ Route::middleware('auth:api')->group(function () {
     Route::post('send-message', [UserChatController::class, 'send_message']);
     Route::get('chats/unread-count', [UserChatController::class, 'unreadCount']);
     Route::post('chats/mark-read', [UserChatController::class, 'markRead']);
+    Route::post('chats/mark-unread', [UserChatController::class, 'markUnread']);
+    Route::post('chats/pin', [UserChatController::class, 'pinConversation']);
+    Route::delete('chats/conversation', [UserChatController::class, 'deleteConversation']);
     Route::get('chats/conversations', [UserChatController::class, 'conversations']);
     Route::get('user-detail/{id}', [UserChatController::class, 'user_detail']);
     Route::post('profile-update', [AuthApiController::class, 'profile_update']);

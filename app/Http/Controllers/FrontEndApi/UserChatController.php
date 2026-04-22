@@ -256,6 +256,10 @@ class UserChatController extends Controller
         $peerIds = $senderIds->merge($receiverIds)->unique()->values();
 
         $conversations = [];
+        
+        // Get pinned users for this user
+        $pinnedUsers = \App\Models\UserPinnedChat::where('user_id', $me)->pluck('pinned_user_id')->toArray();
+
         foreach ($peerIds as $peerId) {
             $lastMessage = UserChat::where(function ($q) use ($me, $peerId) {
                 $q->where('sender_id', $me)->where('received_id', $peerId);
@@ -276,16 +280,73 @@ class UserChatController extends Controller
                     'user' => $user,
                     'last_message' => $lastMessage,
                     'unread_count' => $unread,
+                    'is_pinned' => in_array($peerId, $pinnedUsers)
                 ];
             }
         }
 
-        // Sort by last message date descending
+        // Sort by pinned first, then last message date descending
         usort($conversations, function ($a, $b) {
+            if ($a['is_pinned'] && !$b['is_pinned']) return -1;
+            if (!$a['is_pinned'] && $b['is_pinned']) return 1;
             return strtotime($b['last_message']['created_at']) - strtotime($a['last_message']['created_at']);
         });
 
         return response()->json(['status' => 200, 'data' => $conversations]);
+    }
+
+    public function markUnread(Request $request)
+    {
+        $peerId = $request->user_id;
+        
+        // Mark the last message as unread by setting read_at to null
+        $lastMessage = UserChat::where('sender_id', $peerId)
+            ->where('received_id', Auth::id())
+            ->orderBy('created_at', 'desc')
+            ->first();
+            
+        if ($lastMessage) {
+            $lastMessage->read_at = null;
+            $lastMessage->save();
+        }
+
+        return response()->json(['status' => 200, 'message' => 'Conversation marked as unread']);
+    }
+    
+    public function pinConversation(Request $request)
+    {
+        $me = Auth::id();
+        $peerId = $request->user_id;
+        
+        $pinned = \App\Models\UserPinnedChat::where('user_id', $me)
+                                            ->where('pinned_user_id', $peerId)
+                                            ->first();
+                                            
+        if ($pinned) {
+            $pinned->delete();
+            return response()->json(['status' => 200, 'message' => 'Conversation unpinned']);
+        } else {
+            \App\Models\UserPinnedChat::create([
+                'user_id' => $me,
+                'pinned_user_id' => $peerId
+            ]);
+            return response()->json(['status' => 200, 'message' => 'Conversation pinned']);
+        }
+    }
+    
+    public function deleteConversation(Request $request)
+    {
+        $me = Auth::id();
+        $peerId = $request->user_id;
+        
+        // Hard delete all messages between these two users
+        UserChat::where(function ($q) use ($me, $peerId) {
+            $q->where('sender_id', $me)->where('received_id', $peerId);
+        })->orWhere(function ($q) use ($me, $peerId) {
+            $q->where('sender_id', $peerId)->where('received_id', $me);
+        })->delete();
+        
+        return response()->json(['status' => 200, 'message' => 'Conversation deleted']);
     }
 
     protected function users()

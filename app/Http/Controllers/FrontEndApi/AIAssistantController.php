@@ -307,7 +307,7 @@ PROMPT;
                 return response()->json(['error' => 'Unauthorized'], 401);
             }
 
-            $apiKey = config('services.gemini.api_key');
+            $apiKey = config('services.groq.api_key');
             if (!$apiKey) {
                 return response()->json(['error' => 'AI service not configured'], 503);
             }
@@ -315,51 +315,54 @@ PROMPT;
             $context = $this->getUserContext($user);
             $systemPrompt = $this->getSystemPrompt($user, $context);
 
-            // Build Gemini contents array
-            $contents = [];
+            // Build Groq/OpenAI compatible contents array
+            $messages = [];
+            
+            $messages[] = [
+                'role' => 'system',
+                'content' => $systemPrompt
+            ];
 
             // Add conversation history (last 20 messages max)
             $history = $request->conversation ?? [];
             $history = array_slice($history, -20);
             foreach ($history as $msg) {
                 if (isset($msg['role']) && isset($msg['content'])) {
-                    $contents[] = [
-                        'role' => $msg['role'] === 'assistant' ? 'model' : 'user',
-                        'parts' => [['text' => $msg['content']]],
+                    $messages[] = [
+                        'role' => $msg['role'] === 'assistant' ? 'assistant' : 'user',
+                        'content' => $msg['content']
                     ];
                 }
             }
 
             // Add current message
-            $contents[] = [
+            $messages[] = [
                 'role' => 'user',
-                'parts' => [['text' => $request->message]],
+                'content' => $request->message
             ];
 
-            $model = config('services.gemini.model', 'gemini-2.5-flash');
+            $model = config('services.groq.model', 'llama-3.1-8b-instant');
+
             $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $apiKey,
                 'Content-Type' => 'application/json',
             ])->timeout(60)->post(
-                "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
+                "https://api.groq.com/openai/v1/chat/completions",
                 [
-                    'system_instruction' => [
-                        'parts' => [['text' => $systemPrompt]],
-                    ],
-                    'contents' => $contents,
-                    'generationConfig' => [
-                        'maxOutputTokens' => 1200,
-                        'temperature' => 0.7,
-                    ],
+                    'model' => $model,
+                    'messages' => $messages,
+                    'max_tokens' => 1200,
+                    'temperature' => 0.7,
                 ]
             );
 
             if ($response->failed()) {
-                Log::error('Gemini API error', ['status' => $response->status(), 'body' => $response->body()]);
+                Log::error('Groq API error', ['status' => $response->status(), 'body' => $response->body()]);
                 return response()->json(['error' => 'AI service temporarily unavailable: ' . ($response->json()['error']['message'] ?? 'Unknown error')], 503);
             }
 
             $data = $response->json();
-            $reply = $data['candidates'][0]['content']['parts'][0]['text'] ?? 'Sorry, I could not generate a response.';
+            $reply = $data['choices'][0]['message']['content'] ?? 'Sorry, I could not generate a response.';
 
             return response()->json([
                 'status' => 200,
