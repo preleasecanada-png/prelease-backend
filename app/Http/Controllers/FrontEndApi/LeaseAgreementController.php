@@ -8,6 +8,7 @@ use App\Models\RentalApplication;
 use App\Models\RentalInsurance;
 use App\Models\User;
 use App\Notifications\LeaseReminderNotification;
+use App\Services\LeaseTemplateService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -108,10 +109,23 @@ class LeaseAgreementController extends Controller
                 'total_payable' => $totalPayable,
                 'status' => 'pending_renter_signature',
                 'special_conditions' => $request->special_conditions,
-                'terms' => $this->generateProvincialLease(
-                    $province, $leaseType, $monthlyRent, $startDate, $endDate,
-                    $property, $renterUser, $landlordUser, $request->special_conditions
-                ),
+                'terms' => app(LeaseTemplateService::class)->build([
+                    'province' => $province,
+                    'property' => $property,
+                    'renter' => $renterUser,
+                    'landlord' => $landlordUser,
+                    'leaseType' => $leaseType,
+                    'monthlyRent' => $monthlyRent,
+                    'startDate' => $startDate,
+                    'endDate' => $endDate,
+                    'specialConditions' => $request->special_conditions,
+                    'totalRent' => $totalRent,
+                    'supportFee' => $supportFee,
+                    'commissionFee' => $commissionFee,
+                    'insuranceFee' => $insuranceFee,
+                    'totalPayable' => $totalPayable,
+                    'paymentPlan' => $request->payment_plan ?? 'upfront',
+                ]),
             ]);
 
             $lease->load(['property', 'renter', 'landlord']);
