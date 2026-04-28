@@ -17,7 +17,8 @@ class MaintenanceRequestController extends Controller
             $user = Auth::user();
             $query = MaintenanceRequest::with(['tenant', 'landlord', 'property']);
 
-            if ($user->role === 'host') {
+            $isLandlord = in_array(strtolower($user->role), ['landlord', 'host', 'admin']);
+            if ($isLandlord) {
                 $query->where('landlord_id', $user->id);
             } else {
                 $query->where('tenant_id', $user->id);

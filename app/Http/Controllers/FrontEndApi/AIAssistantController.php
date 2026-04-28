@@ -175,7 +175,7 @@ PROMPT;
         $context = [];
 
         try {
-            $isRenter = in_array($user->role, ['renter', 'Tenant', null, '']);
+            $isRenter = in_array(strtolower($user->role), ['renter', 'tenant', null, '']);
 
             // ── Frontend base URL ──
             $context['base_url'] = config('services.frontend.url', 'https://www.preleasecanada.ca');

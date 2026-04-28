@@ -20,6 +20,7 @@ use App\Http\Controllers\FrontEndApi\DashboardController;
 use App\Http\Controllers\FrontEndApi\AdminController;
 use App\Http\Controllers\FrontEndApi\AIAssistantController;
 use App\Http\Controllers\FrontEndApi\BackgroundCheckController;
+use App\Http\Controllers\FrontEndApi\VirtualAssistantController;
 use App\Http\Controllers\AdminApplicationController;
 use App\Http\Controllers\AdminPaymentController;
 use App\Http\Controllers\AdminReferralController;
@@ -202,6 +203,23 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/suggestions', 'suggestions');
     });
 
+    // Virtual Assistant
+    Route::prefix('virtual-assistant')->controller(VirtualAssistantController::class)->group(function () {
+        Route::post('/start', 'startConversation');
+        Route::post('/send-message', 'sendMessage');
+        Route::get('/conversations', 'getConversations');
+        Route::get('/conversations/{id}', 'getConversation');
+        Route::post('/conversations/{id}/close', 'closeConversation');
+        Route::get('/settings', 'getSettings');
+        Route::post('/settings', 'updateSettings');
+    });
+
+// Twilio Webhooks (no authentication)
+Route::post('/twilio/sms', [VirtualAssistantController::class, 'handleIncomingSMS']);
+Route::post('/twilio/call', [VirtualAssistantController::class, 'handleIncomingCall']);
+Route::post('/twilio/gather', [VirtualAssistantController::class, 'handleVoiceGather']);
+
+    // 
     // My Properties (Landlord)
     Route::get('property/my-properties', [PropertyController::class, 'myProperties']);
     Route::post('property/{id}/update', [PropertyController::class, 'update']);

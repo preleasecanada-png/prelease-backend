@@ -20,8 +20,10 @@ class DashboardController extends Controller
             $user = Auth::user();
             $data = [];
 
-            if ($user->role === 'host') {
-                // Landlord stats
+            // Determine role based on user's role in database, not request parameter
+            $isLandlord = in_array(strtolower($user->role), ['landlord', 'host', 'admin']);
+
+            if ($isLandlord) {
                 $data['total_properties'] = Property::where('user_id', $user->id)->count();
                 $data['active_leases'] = LeaseAgreement::where('landlord_id', $user->id)
                     ->where('status', 'active')->count();
@@ -76,7 +78,8 @@ class DashboardController extends Controller
     {
         try {
             $user = Auth::user();
-            if ($user->role !== 'host') {
+            $isLandlord = in_array(strtolower($user->role), ['landlord', 'host', 'admin']);
+            if (!$isLandlord) {
                 return response()->json(['status' => 403, 'message' => 'Unauthorized'], 403);
             }
 
