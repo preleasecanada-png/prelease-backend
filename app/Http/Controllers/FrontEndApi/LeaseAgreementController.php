@@ -21,19 +21,11 @@ class LeaseAgreementController extends Controller
     {
         try {
             $user = Auth::guard('api')->user();
-            $role = $request->role ?? 'renter';
 
-            if ($role === 'landlord') {
-                $leases = LeaseAgreement::with(['property.propertyImages', 'renter', 'payments', 'insurance'])
-                    ->where('landlord_id', $user->id)
-                    ->orderBy('created_at', 'desc')
-                    ->paginate(20);
-            } else {
-                $leases = LeaseAgreement::with(['property.propertyImages', 'landlord', 'payments', 'insurance'])
-                    ->where('renter_id', $user->id)
-                    ->orderBy('created_at', 'desc')
-                    ->paginate(20);
-            }
+            // All authenticated users (hosts, renters, admins) can see all leases
+            $leases = LeaseAgreement::with(['property.propertyImages', 'renter', 'landlord', 'payments', 'insurance'])
+                ->orderBy('created_at', 'desc')
+                ->paginate(20);
 
             return response()->json(['status' => 200, 'data' => $leases]);
         } catch (\Throwable $th) {

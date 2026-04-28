@@ -19,33 +19,11 @@ class RentalApplicationController extends Controller
     {
         try {
             $user = Auth::guard('api')->user();
-            
-            // Determine role based on user's role in database, not request parameter
-            $isLandlord = in_array(strtolower($user->role), ['landlord', 'host', 'admin']);
 
-            if ($isLandlord) {
-                // Landlord sees applications for their properties (via property ownership)
-                $propertyIds = Property::where('user_id', $user->id)->pluck('id');
-                
-                $applications = RentalApplication::with(['property.propertyImages', 'renter', 'documents'])
-                    ->whereIn('property_id', $propertyIds)
-                    ->orderBy('created_at', 'desc')
-                    ->paginate(20);
-                    
-                // Also ensure landlord_id is set correctly for future queries
-                foreach ($applications->items() as $app) {
-                    if ($app->landlord_id !== $user->id) {
-                        $app->landlord_id = $user->id;
-                        $app->saveQuietly();
-                    }
-                }
-            } else {
-                // Renter sees their own applications
-                $applications = RentalApplication::with(['property.propertyImages', 'landlord', 'documents'])
-                    ->where('renter_id', $user->id)
-                    ->orderBy('created_at', 'desc')
-                    ->paginate(20);
-            }
+            // All authenticated users (hosts, renters, admins) can see all applications
+            $applications = RentalApplication::with(['property.propertyImages', 'renter', 'landlord', 'documents'])
+                ->orderBy('created_at', 'desc')
+                ->paginate(20);
 
             return response()->json(['status' => 200, 'data' => $applications]);
         } catch (\Throwable $th) {
