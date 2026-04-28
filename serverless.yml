@@ -61,7 +61,7 @@ provider:
           Resource: '*'
 
 custom:
-  s3Bucket: prelease-storage-${self:provider.stage}
+  s3Bucket: prelease-backend-storage-${self:provider.stage}
 
 package:
   patterns:
