@@ -19,14 +19,28 @@ class RentalApplicationController extends Controller
     {
         try {
             $user = Auth::guard('api')->user();
-            $role = $request->role ?? 'renter';
+            
+            // Determine role based on user's role in database, not request parameter
+            $isLandlord = in_array(strtolower($user->role), ['landlord', 'host', 'admin']);
 
-            if ($role === 'landlord') {
+            if ($isLandlord) {
+                // Landlord sees applications for their properties (via property ownership)
+                $propertyIds = Property::where('user_id', $user->id)->pluck('id');
+                
                 $applications = RentalApplication::with(['property.propertyImages', 'renter', 'documents'])
-                    ->where('landlord_id', $user->id)
+                    ->whereIn('property_id', $propertyIds)
                     ->orderBy('created_at', 'desc')
                     ->paginate(20);
+                    
+                // Also ensure landlord_id is set correctly for future queries
+                foreach ($applications->items() as $app) {
+                    if ($app->landlord_id !== $user->id) {
+                        $app->landlord_id = $user->id;
+                        $app->saveQuietly();
+                    }
+                }
             } else {
+                // Renter sees their own applications
                 $applications = RentalApplication::with(['property.propertyImages', 'landlord', 'documents'])
                     ->where('renter_id', $user->id)
                     ->orderBy('created_at', 'desc')
@@ -131,12 +145,27 @@ class RentalApplicationController extends Controller
         try {
             $user = Auth::guard('api')->user();
             $application = RentalApplication::with(['property.propertyImages', 'renter', 'landlord', 'documents'])
-                ->where(function ($q) use ($user) {
-                    $q->where('renter_id', $user->id)->orWhere('landlord_id', $user->id);
-                })
                 ->findOrFail($id);
 
-            return response()->json(['status' => 200, 'data' => $application]);
+            $viewerIsLandlord = false;
+            if ($application->property && (int) $application->property->user_id === (int) $user->id) {
+                $viewerIsLandlord = true;
+            }
+
+            $viewerCanSee = ((int) $application->renter_id === (int) $user->id)
+                || ((int) $application->landlord_id === (int) $user->id)
+                || $viewerIsLandlord;
+
+            if (!$viewerCanSee) {
+                return response()->json(['status' => 403, 'message' => 'Unauthorized'], 403);
+            }
+
+            if ($viewerIsLandlord && (int) $application->landlord_id !== (int) $user->id) {
+                $application->landlord_id = $user->id;
+                $application->saveQuietly();
+            }
+
+            return response()->json(['status' => 200, 'data' => $application, 'viewer_is_landlord' => $viewerIsLandlord]);
         } catch (\Throwable $th) {
             return response()->json(['status' => 500, 'error' => $th->getMessage()]);
         }
@@ -198,7 +227,21 @@ class RentalApplicationController extends Controller
 
         try {
             $user = Auth::guard('api')->user();
-            $application = RentalApplication::where('landlord_id', $user->id)->findOrFail($id);
+            $application = RentalApplication::with('property')->findOrFail($id);
+
+            $viewerIsLandlord = false;
+            if ($application->property && (int) $application->property->user_id === (int) $user->id) {
+                $viewerIsLandlord = true;
+            }
+
+            $viewerCanUpdate = ((int) $application->landlord_id === (int) $user->id) || $viewerIsLandlord;
+            if (!$viewerCanUpdate) {
+                return response()->json(['status' => 403, 'message' => 'Unauthorized'], 403);
+            }
+
+            if ($viewerIsLandlord && (int) $application->landlord_id !== (int) $user->id) {
+                $application->landlord_id = $user->id;
+            }
 
             $application->status = $request->status;
             $application->landlord_notes = $request->landlord_notes;
