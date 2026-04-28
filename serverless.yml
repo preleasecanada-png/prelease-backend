@@ -1,4 +1,4 @@
-service: prelease-api
+service: prelease-backend
 
 provider:
   name: aws
