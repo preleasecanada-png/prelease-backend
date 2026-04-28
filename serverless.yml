@@ -2,7 +2,7 @@ service: prelease-backend
 
 provider:
   name: aws
-  region: us-east-1
+  region: ca-central-1
   stage: production
   runtime: provided.al2023
   memorySize: 1024
