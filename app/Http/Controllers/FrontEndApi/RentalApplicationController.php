@@ -15,24 +15,24 @@ use Illuminate\Support\Facades\Validator;
 
 class RentalApplicationController extends Controller
 {
+    // Version: 2026-04-29-v2
     public function index(Request $request)
     {
         try {
             $user = Auth::guard('api')->user();
-
-            // Fetch all applications
-            $applications = RentalApplication::with(['property.propertyImages', 'renter', 'landlord', 'documents'])
-                ->orderBy('created_at', 'desc')
+            
+            // Simple query to ensure response
+            $applications = RentalApplication::with(['property', 'renter', 'landlord'])
+                ->latest()
                 ->get();
 
             return response()->json([
                 'status' => 200, 
                 'data' => $applications,
                 'debug' => [
-                    'user_id' => $user->id,
-                    'user_email' => $user->email,
-                    'total_count_in_db' => RentalApplication::count(),
-                    'retrieved_count' => $applications->count()
+                    'ts' => time(),
+                    'user' => $user->email,
+                    'db_total' => RentalApplication::count()
                 ]
             ]);
         } catch (\Throwable $th) {
