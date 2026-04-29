@@ -19,19 +19,10 @@ class PaymentController extends Controller
     {
         try {
             $user = Auth::guard('api')->user();
-            $role = $request->role ?? 'renter';
 
-            if ($role === 'landlord') {
-                $payments = Payment::with(['property.propertyImages', 'renter', 'leaseAgreement'])
-                    ->where('landlord_id', $user->id)
-                    ->orderBy('created_at', 'desc')
-                    ->paginate(20);
-            } else {
-                $payments = Payment::with(['property.propertyImages', 'landlord', 'leaseAgreement'])
-                    ->where('renter_id', $user->id)
-                    ->orderBy('created_at', 'desc')
-                    ->paginate(20);
-            }
+            $payments = Payment::with(['property.propertyImages', 'renter', 'landlord', 'leaseAgreement'])
+                ->orderBy('created_at', 'desc')
+                ->paginate(20);
 
             return response()->json(['status' => 200, 'data' => $payments]);
         } catch (\Throwable $th) {
