@@ -21,9 +21,10 @@ class RentalApplicationController extends Controller
             $user = Auth::guard('api')->user();
 
             // All authenticated users (hosts, renters, admins) can see all applications
+            // Using get() instead of paginate to ensure all records are sent and avoid structure mismatches
             $applications = RentalApplication::with(['property.propertyImages', 'renter', 'landlord', 'documents'])
                 ->orderBy('created_at', 'desc')
-                ->paginate(20);
+                ->get();
 
             return response()->json(['status' => 200, 'data' => $applications]);
         } catch (\Throwable $th) {
