@@ -49,7 +49,7 @@ class AdminController extends Controller
 
             // Advanced analytics
             $totalApplications = RentalApplication::count();
-            $pendingApplications = RentalApplication::where('status', 'pending')->count();
+            $pendingApplications = RentalApplication::whereIn('status', ['submitted', 'under_review'])->count();
             $approvedApplications = RentalApplication::where('status', 'approved')->count();
             $rejectedApplications = RentalApplication::where('status', 'rejected')->count();
 
@@ -57,8 +57,8 @@ class AdminController extends Controller
             $activeLeases = LeaseAgreement::where('status', 'active')->count();
 
             $totalPayments = Payment::count();
-            $totalRevenue = Payment::where('status', 'paid')->sum('total_amount');
-            $totalCommission = Payment::where('status', 'paid')->sum('commission_fee');
+            $totalRevenue = Payment::where('status', 'completed')->sum('total_amount');
+            $totalCommission = Payment::where('status', 'completed')->sum('commission_fee');
 
             $totalMaintenance = \App\Models\MaintenanceRequest::count();
             $openMaintenance = \App\Models\MaintenanceRequest::whereIn('status', ['pending', 'in_progress'])->count();
@@ -67,7 +67,7 @@ class AdminController extends Controller
             $monthlyRevenue = [];
             for ($i = 5; $i >= 0; $i--) {
                 $date = now()->subMonths($i);
-                $rev = Payment::where('status', 'paid')
+                $rev = Payment::where('status', 'completed')
                     ->whereYear('created_at', $date->year)
                     ->whereMonth('created_at', $date->month)
                     ->sum('total_amount');

@@ -37,11 +37,14 @@ class LeaseAgreementController extends Controller
     {
         try {
             $user = Auth::guard('api')->user();
-            $lease = LeaseAgreement::with(['property.propertyImages', 'renter', 'landlord', 'payments', 'insurance', 'rentalApplication'])
-                ->where(function ($q) use ($user) {
+            $isAdmin = strtolower($user->role ?? '') === 'admin';
+            $query = LeaseAgreement::with(['property.propertyImages', 'renter', 'landlord', 'payments', 'insurance', 'rentalApplication']);
+            if (!$isAdmin) {
+                $query->where(function ($q) use ($user) {
                     $q->where('renter_id', $user->id)->orWhere('landlord_id', $user->id);
-                })
-                ->findOrFail($id);
+                });
+            }
+            $lease = $query->findOrFail($id);
 
             return response()->json(['status' => 200, 'data' => $lease]);
         } catch (\Throwable $th) {
@@ -227,25 +230,6 @@ class LeaseAgreementController extends Controller
         } catch (\Throwable $th) {
             return response()->json(['status' => 500, 'error' => $th->getMessage()]);
         }
-    }
-
-    private function generateLeaseTerms($leaseType, $monthlyRent, $startDate, $endDate)
-    {
-        $months = $leaseType === '3_month' ? 3 : 6;
-        $totalRent = $monthlyRent * $months;
-
-        return "PRELEASE CANADA LEASE AGREEMENT\n\n"
-            . "Lease Type: " . str_replace('_', ' ', $leaseType) . " lease\n"
-            . "Monthly Rent: $" . number_format($monthlyRent, 2) . "\n"
-            . "Total Rent: $" . number_format($totalRent, 2) . "\n"
-            . "Lease Period: " . $startDate->format('M d, Y') . " to " . $endDate->format('M d, Y') . "\n"
-            . "Payment: Complete upfront payment required\n"
-            . "Support Fee: $100.00/month (Prelease Canada service fee)\n\n"
-            . "TERMS AND CONDITIONS:\n"
-            . "1. The full rent amount must be paid upfront before the lease start date.\n"
-            . "2. Rental insurance is mandatory and will be arranged through Prelease Canada.\n"
-            . "3. This lease is governed by the applicable provincial tenancy laws.\n"
-            . "4. Both parties agree to the terms outlined in this agreement.\n";
     }
 
     private function generateProvincialLease($province, $leaseType, $monthlyRent, $startDate, $endDate, $property, $renter, $landlord, $specialConditions = null)

@@ -11,6 +11,7 @@ use App\Notifications\ApplicationStatusNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class RentalApplicationController extends Controller
@@ -125,22 +126,19 @@ class RentalApplicationController extends Controller
             $application = RentalApplication::with(['property.propertyImages', 'renter', 'landlord', 'documents'])
                 ->findOrFail($id);
 
+            $isAdmin = strtolower($user->role ?? '') === 'admin';
             $viewerIsLandlord = false;
             if ($application->property && (int) $application->property->user_id === (int) $user->id) {
                 $viewerIsLandlord = true;
             }
 
-            $viewerCanSee = ((int) $application->renter_id === (int) $user->id)
+            $viewerCanSee = $isAdmin
+                || ((int) $application->renter_id === (int) $user->id)
                 || ((int) $application->landlord_id === (int) $user->id)
                 || $viewerIsLandlord;
 
             if (!$viewerCanSee) {
                 return response()->json(['status' => 403, 'message' => 'Unauthorized'], 403);
-            }
-
-            if ($viewerIsLandlord && (int) $application->landlord_id !== (int) $user->id) {
-                $application->landlord_id = $user->id;
-                $application->saveQuietly();
             }
 
             return response()->json(['status' => 200, 'data' => $application, 'viewer_is_landlord' => $viewerIsLandlord]);
@@ -169,7 +167,12 @@ class RentalApplicationController extends Controller
             $file = $request->file('document');
             $extension = $file->getClientOriginalExtension();
             $fileName = 'documents/' . time() . '_' . rand(1000, 9999) . '.' . $extension;
-            $file->move(public_path('documents'), $fileName);
+            try {
+                Storage::disk('s3')->put($fileName, file_get_contents($file));
+            } catch (\Throwable $e) {
+                Log::warning('S3 document upload failed, falling back to local: ' . $e->getMessage());
+                $file->move(public_path('documents'), basename($fileName));
+            }
 
             $document = ApplicationDocument::create([
                 'rental_application_id' => $application->id,

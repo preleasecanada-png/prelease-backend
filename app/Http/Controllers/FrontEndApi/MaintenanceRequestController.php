@@ -95,12 +95,15 @@ class MaintenanceRequestController extends Controller
     {
         try {
             $user = Auth::user();
-            $request = MaintenanceRequest::with(['tenant', 'landlord', 'property'])
-                ->where(function ($q) use ($user) {
+            $isAdmin = strtolower($user->role ?? '') === 'admin';
+            $query = MaintenanceRequest::with(['tenant', 'landlord', 'property']);
+            if (!$isAdmin) {
+                $query->where(function ($q) use ($user) {
                     $q->where('tenant_id', $user->id)
                       ->orWhere('landlord_id', $user->id);
-                })
-                ->findOrFail($id);
+                });
+            }
+            $request = $query->findOrFail($id);
 
             return response()->json(['status' => 200, 'data' => $request]);
         } catch (\Throwable $th) {

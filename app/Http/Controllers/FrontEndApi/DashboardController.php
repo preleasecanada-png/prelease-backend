@@ -29,16 +29,16 @@ class DashboardController extends Controller
                     ->where('status', 'active')->count();
                 $data['pending_applications'] = RentalApplication::whereHas('property', function ($q) use ($user) {
                     $q->where('user_id', $user->id);
-                })->where('status', 'pending')->count();
+                })->whereIn('status', ['submitted', 'under_review'])->count();
                 $data['total_revenue'] = Payment::where('landlord_id', $user->id)
-                    ->where('status', 'confirmed')->sum('amount');
+                    ->where('status', 'completed')->sum('total_amount');
                 $data['open_maintenance'] = MaintenanceRequest::where('landlord_id', $user->id)
                     ->whereIn('status', ['pending', 'in_progress'])->count();
                 $data['unread_notifications'] = Notification::where('user_id', $user->id)
                     ->where('is_read', false)->count();
 
                 // Recent activity
-                $data['recent_applications'] = RentalApplication::with(['user', 'property'])
+                $data['recent_applications'] = RentalApplication::with(['renter', 'property'])
                     ->whereHas('property', function ($q) use ($user) {
                         $q->where('user_id', $user->id);
                     })
@@ -49,11 +49,11 @@ class DashboardController extends Controller
                 // Renter stats
                 $data['active_leases'] = LeaseAgreement::where('renter_id', $user->id)
                     ->where('status', 'active')->count();
-                $data['my_applications'] = RentalApplication::where('user_id', $user->id)->count();
-                $data['pending_applications'] = RentalApplication::where('user_id', $user->id)
-                    ->where('status', 'pending')->count();
+                $data['my_applications'] = RentalApplication::where('renter_id', $user->id)->count();
+                $data['pending_applications'] = RentalApplication::where('renter_id', $user->id)
+                    ->whereIn('status', ['submitted', 'under_review'])->count();
                 $data['total_paid'] = Payment::where('renter_id', $user->id)
-                    ->where('status', 'confirmed')->sum('amount');
+                    ->where('status', 'completed')->sum('total_amount');
                 $data['open_maintenance'] = MaintenanceRequest::where('tenant_id', $user->id)
                     ->whereIn('status', ['pending', 'in_progress'])->count();
                 $data['unread_notifications'] = Notification::where('user_id', $user->id)
@@ -61,7 +61,7 @@ class DashboardController extends Controller
 
                 // Recent activity
                 $data['recent_applications'] = RentalApplication::with(['property'])
-                    ->where('user_id', $user->id)
+                    ->where('renter_id', $user->id)
                     ->orderBy('created_at', 'desc')
                     ->limit(5)->get();
             }
@@ -98,7 +98,7 @@ class DashboardController extends Controller
             foreach ($properties as $prop) {
                 $prop->total_earned = Payment::where('landlord_id', $user->id)
                     ->where('property_id', $prop->id)
-                    ->where('status', 'paid')
+                    ->where('status', 'completed')
                     ->sum('landlord_payout_amount');
                 $prop->app_count = RentalApplication::where('property_id', $prop->id)->count();
                 $reviews = \App\Models\Review::where('property_id', $prop->id);
@@ -111,7 +111,7 @@ class DashboardController extends Controller
             for ($i = 5; $i >= 0; $i--) {
                 $date = now()->subMonths($i);
                 $rev = Payment::where('landlord_id', $user->id)
-                    ->where('status', 'paid')
+                    ->where('status', 'completed')
                     ->whereYear('created_at', $date->year)
                     ->whereMonth('created_at', $date->month)
                     ->sum('landlord_payout_amount');
@@ -125,7 +125,7 @@ class DashboardController extends Controller
             $appTotal = RentalApplication::whereIn('property_id', $propertyIds)->count();
             $appApproved = RentalApplication::whereIn('property_id', $propertyIds)->where('status', 'approved')->count();
             $appRejected = RentalApplication::whereIn('property_id', $propertyIds)->where('status', 'rejected')->count();
-            $appPending = RentalApplication::whereIn('property_id', $propertyIds)->where('status', 'pending')->count();
+            $appPending = RentalApplication::whereIn('property_id', $propertyIds)->whereIn('status', ['submitted', 'under_review'])->count();
 
             // Maintenance summary
             $maintTotal = MaintenanceRequest::where('landlord_id', $user->id)->count();
@@ -133,7 +133,7 @@ class DashboardController extends Controller
             $maintResolved = MaintenanceRequest::where('landlord_id', $user->id)->where('status', 'completed')->count();
 
             // Totals
-            $totalEarned = Payment::where('landlord_id', $user->id)->where('status', 'paid')->sum('landlord_payout_amount');
+            $totalEarned = Payment::where('landlord_id', $user->id)->where('status', 'completed')->sum('landlord_payout_amount');
             $totalLeases = LeaseAgreement::where('landlord_id', $user->id)->count();
             $activeLeases = LeaseAgreement::where('landlord_id', $user->id)->where('status', 'active')->count();
 

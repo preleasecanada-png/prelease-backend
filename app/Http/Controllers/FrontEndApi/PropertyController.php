@@ -39,11 +39,16 @@ class PropertyController extends Controller
             return response()->json(['errors' => $validation->errors()], 422);
         }
         try {
+            // Always use authenticated user as the owner of the property
+            $authUser = Auth::guard('api')->user();
+            if (!$authUser) {
+                return response()->json(['status' => 401, 'message' => 'Unauthenticated'], 401);
+            }
             $property_id = null;
             $property = new Property();
             $property->title = $request->title;
             $property->slug = Str::slug($request->title, '-');
-            $property->user_id = $request->user_id;
+            $property->user_id = $authUser->id;
             $property->describe_your_place = $request->describe_your_place;
             $property->country = $request->country;
             $property->street_address = $request->address;
@@ -255,10 +260,14 @@ class PropertyController extends Controller
     protected function wish_list_store(Request $request)
     {
         try {
+            $authUser = Auth::guard('api')->user();
+            if (!$authUser) {
+                return response()->json(['status' => 401, 'message' => 'Unauthenticated'], 401);
+            }
             $property_id = $request->property_id;
-            $user_id = $request->user_id;
-            if (!$property_id || !$user_id) {
-                return response()->json(['status' => 422, 'message' => 'Missing property_id or user_id']);
+            $user_id = $authUser->id;
+            if (!$property_id) {
+                return response()->json(['status' => 422, 'message' => 'Missing property_id']);
             }
             $wishlistExists = WishList::where('property_id', $property_id)
                 ->where('user_id', $user_id)
@@ -280,13 +289,18 @@ class PropertyController extends Controller
     protected function wish_list_delete(Request $request)
     {
         try {
+            $authUser = Auth::guard('api')->user();
+            if (!$authUser) {
+                return response()->json(['status' => 401, 'message' => 'Unauthenticated'], 401);
+            }
             $id = $request->id;
-            $wishList = WishList::findOrFail($id);
+            // Only allow deleting wishlist items owned by the authenticated user
+            $wishList = WishList::where('user_id', $authUser->id)->findOrFail($id);
             $wishList->delete();
             return response()->json(['status' => 200, 'message' => 'Wish list deleted successfully!']);
         } catch (\Throwable $th) {
             return response()->json([
-                'error' => $th,
+                'error' => $th->getMessage(),
                 'status' => 404
             ]);
         }

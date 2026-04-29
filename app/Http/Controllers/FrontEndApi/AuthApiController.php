@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Socialite\Facades\Socialite;
 use GuzzleHttp\Exception\ClientException;
 use Illuminate\Support\Facades\Validator;
@@ -30,7 +31,7 @@ class AuthApiController extends Controller
             'email' => 'required|email|unique:users,email',
             'password' => 'required|min:8',
             'confirm_password' => 'required|same:password|min:8',
-            'role' => 'required',
+            'role' => 'required|in:renter,host,landlord',
         ]);
         if ($validator->fails()) {
             $errors = $validator->errors();
@@ -191,8 +192,11 @@ class AuthApiController extends Controller
 
     protected function profile_update(Request $request)
     {
-        $id = $request->id;
-        $user = User::find($id);
+        // Use authenticated user only — never trust request->id
+        $user = Auth::guard('api')->user();
+        if (!$user) {
+            return response()->json(['status' => 401, 'message' => 'Unauthenticated'], 401);
+        }
         if (!empty($request->first_name) && $request->first_name != '') {
             $user->first_name = $request->first_name;
         }
@@ -215,8 +219,14 @@ class AuthApiController extends Controller
             $file = $request->file('picture');
             $extension = $file->getClientOriginalExtension();
             $fileName = 'images/profile_pictures/' . time() . '_' . $user->id . '.' . $extension;
-            $file->move(public_path('images/profile_pictures'), basename($fileName));
-            $user->picture = $fileName;
+            try {
+                Storage::disk('s3')->put($fileName, file_get_contents($file));
+                $user->picture = $fileName;
+            } catch (\Throwable $e) {
+                Log::warning('S3 upload failed, falling back to local: ' . $e->getMessage());
+                $file->move(public_path('images/profile_pictures'), basename($fileName));
+                $user->picture = $fileName;
+            }
         }
         $user->update();
         return response()->json(['status' => 200, 'message' => 'User profile updated successfully!', 'host' => $user]);

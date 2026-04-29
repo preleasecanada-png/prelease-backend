@@ -34,11 +34,14 @@ class PaymentController extends Controller
     {
         try {
             $user = Auth::guard('api')->user();
-            $payment = Payment::with(['property.propertyImages', 'renter', 'landlord', 'leaseAgreement'])
-                ->where(function ($q) use ($user) {
+            $isAdmin = strtolower($user->role ?? '') === 'admin';
+            $query = Payment::with(['property.propertyImages', 'renter', 'landlord', 'leaseAgreement']);
+            if (!$isAdmin) {
+                $query->where(function ($q) use ($user) {
                     $q->where('renter_id', $user->id)->orWhere('landlord_id', $user->id);
-                })
-                ->findOrFail($id);
+                });
+            }
+            $payment = $query->findOrFail($id);
 
             return response()->json(['status' => 200, 'data' => $payment]);
         } catch (\Throwable $th) {
@@ -60,8 +63,9 @@ class PaymentController extends Controller
 
         try {
             $user = Auth::guard('api')->user();
+            // Allow payment when lease is active OR pending landlord signature (renter has already signed)
             $lease = LeaseAgreement::where('renter_id', $user->id)
-                ->where('status', 'active')
+                ->whereIn('status', ['active', 'pending_landlord_signature'])
                 ->findOrFail($request->lease_agreement_id);
 
             $existingPayment = Payment::where('lease_agreement_id', $lease->id)
@@ -213,16 +217,8 @@ class PaymentController extends Controller
             $payment->paid_at = now();
             $payment->save();
 
-            if ($payment->lease_agreement_id) {
-                $lease = LeaseAgreement::find($payment->lease_agreement_id);
-                if ($lease) {
-                    $booking = $lease->booking;
-                    if ($booking) {
-                        $booking->status = 'paid';
-                        $booking->save();
-                    }
-                }
-            }
+            // Note: lease.booking relationship is unused since leases are created from rental_applications,
+            // not bookings. Booking status update is intentionally omitted.
 
             $payment->load(['leaseAgreement', 'property', 'renter', 'landlord']);
 
@@ -253,9 +249,14 @@ class PaymentController extends Controller
     {
         try {
             $user = Auth::guard('api')->user();
-            $lease = LeaseAgreement::where(function ($q) use ($user) {
-                $q->where('renter_id', $user->id)->orWhere('landlord_id', $user->id);
-            })->findOrFail($leaseId);
+            $isAdmin = strtolower($user->role ?? '') === 'admin';
+            $query = LeaseAgreement::query();
+            if (!$isAdmin) {
+                $query->where(function ($q) use ($user) {
+                    $q->where('renter_id', $user->id)->orWhere('landlord_id', $user->id);
+                });
+            }
+            $lease = $query->findOrFail($leaseId);
 
             $months = $lease->lease_type === '3_month' ? 3 : 6;
             $monthlyRent = (float)$lease->monthly_rent;
