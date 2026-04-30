@@ -235,6 +235,18 @@ Route::post('/twilio/gather', [VirtualAssistantController::class, 'handleVoiceGa
 // Public: tour status (renters need to read it) and KIRI webhook callback
 Route::get('property/{id}/tour-status', [PropertyTourController::class, 'status']);
 Route::post('webhooks/kiri-engine', [PropertyTourController::class, 'webhook']);
+
+// Temporary probe to confirm new deploy is live (delete after KIRI test).
+Route::get('debug/kiri-probe', function () {
+    return response()->json([
+        'status' => 200,
+        'kiri_configured' => !empty(config('services.kiri.api_key')),
+        'kiri_key_length' => strlen(config('services.kiri.api_key') ?? ''),
+        'tour_routes_loaded' => true,
+        'sha' => 'eb82aca-or-newer',
+        'time' => now()->toIso8601String(),
+    ]);
+});
 Route::prefix('property')->controller(PropertyController::class)->group(function () {
     Route::get('lists', 'lists');
 });
