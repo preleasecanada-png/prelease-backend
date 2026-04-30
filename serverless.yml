@@ -46,6 +46,11 @@ provider:
     FRONTEND_URL: https://dev.preleasecanada.ca
     FILESYSTEM_DISK: s3
     SQS_PREFIX: !Ref JobsQueue
+    # S3 storage (bucket + region). Lambda's IAM role provides credentials,
+    # so AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are intentionally not set
+    # here; the AWS SDK falls back to the role automatically.
+    AWS_BUCKET: ${self:custom.s3Bucket}
+    AWS_DEFAULT_REGION: ${self:provider.region}
     # KIRI Engine (3D Gaussian Splatting) — set in local .env, never hard-code here.
     KIRI_API_KEY: ${env:KIRI_API_KEY, ''}
     KIRI_WEBHOOK_SECRET: ${env:KIRI_WEBHOOK_SECRET, ''}
