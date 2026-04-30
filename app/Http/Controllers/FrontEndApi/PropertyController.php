@@ -33,23 +33,7 @@ class PropertyController extends Controller
             Storage::disk('s3')->put($s3Path, file_get_contents($file->getRealPath()));
             $property->tour_video_path = $s3Path;
 
-            $kiri = app(KiriEngineService::class);
-            if ($kiri->isConfigured()) {
-                $serialize = $kiri->uploadVideo($file->getRealPath(), generateMesh: false);
-                if ($serialize) {
-                    $property->tour_3d_serialize = $serialize;
-                    $property->tour_3d_status = 'processing';
-                    $property->tour_3d_error = null;
-                } else {
-                    $property->tour_3d_status = 'failed';
-                    $property->tour_3d_error = 'KIRI Engine rejected the upload. You can retry later.';
-                }
-            } else {
-                // Service not configured: keep the video, mark as queued for later processing.
-                $property->tour_3d_status = 'queued';
-                $property->tour_3d_error = '3D conversion service is not configured yet.';
-            }
-            $property->save();
+            $this->forwardTourVideoToKiri($property, $file->getRealPath());
         } catch (\Throwable $e) {
             Log::warning('Tour video attach failed: ' . $e->getMessage());
             $property->tour_3d_status = 'failed';
@@ -57,8 +41,85 @@ class PropertyController extends Controller
             $property->save();
         }
     }
+
+    /**
+     * Process a tour video that was already uploaded directly to S3 (via presigned URL).
+     * Downloads it to a temp file just long enough to forward to KIRI Engine.
+     */
+    protected function attachTourVideoFromS3Key(Property $property, string $s3Key): void
+    {
+        if (!$s3Key) return;
+        $tempPath = null;
+        try {
+            $disk = Storage::disk('s3');
+            if (!$disk->exists($s3Key)) {
+                Log::warning('Tour video S3 key not found', ['key' => $s3Key]);
+                $property->tour_3d_status = 'failed';
+                $property->tour_3d_error = 'Uploaded video could not be located on storage.';
+                $property->save();
+                return;
+            }
+
+            $property->tour_video_path = $s3Key;
+            $property->save();
+
+            // Download to temp so we can stream it into KIRI's multipart endpoint.
+            $extension = pathinfo($s3Key, PATHINFO_EXTENSION) ?: 'mp4';
+            $tempPath = tempnam(sys_get_temp_dir(), 'tour_') . '.' . $extension;
+            $stream = $disk->readStream($s3Key);
+            $local = fopen($tempPath, 'wb');
+            while (!feof($stream)) {
+                fwrite($local, fread($stream, 1024 * 1024));
+            }
+            fclose($local);
+            fclose($stream);
+
+            $this->forwardTourVideoToKiri($property, $tempPath);
+        } catch (\Throwable $e) {
+            Log::warning('Tour video (S3 key) attach failed: ' . $e->getMessage());
+            $property->tour_3d_status = 'failed';
+            $property->tour_3d_error = 'Could not process the tour video.';
+            $property->save();
+        } finally {
+            if ($tempPath && file_exists($tempPath)) {
+                @unlink($tempPath);
+            }
+        }
+    }
+
+    /**
+     * Shared logic: hand off a local video file path to KIRI Engine and
+     * persist the resulting status on the property.
+     */
+    protected function forwardTourVideoToKiri(Property $property, string $localPath): void
+    {
+        $kiri = app(KiriEngineService::class);
+        if ($kiri->isConfigured()) {
+            $serialize = $kiri->uploadVideo($localPath, generateMesh: false);
+            if ($serialize) {
+                $property->tour_3d_serialize = $serialize;
+                $property->tour_3d_status = 'processing';
+                $property->tour_3d_error = null;
+            } else {
+                $property->tour_3d_status = 'failed';
+                $property->tour_3d_error = 'KIRI Engine rejected the upload. You can retry later.';
+            }
+        } else {
+            $property->tour_3d_status = 'queued';
+            $property->tour_3d_error = '3D conversion service is not configured yet.';
+        }
+        $property->save();
+    }
     protected function store(Request $request)
     {
+        // Photos and the optional tour video may arrive in two ways:
+        //   - Legacy: multipart upload (`property_images[]`, `tour_video`).
+        //   - New: pre-uploaded to S3 via presigned URLs, with the keys passed
+        //          in `property_image_keys[]` and `tour_video_key` (avoids the
+        //          API Gateway 10 MB limit for large videos).
+        $hasImageFiles = is_array($request->file('property_images')) && count($request->file('property_images')) > 0;
+        $hasImageKeys  = is_array($request->input('property_image_keys')) && count($request->input('property_image_keys')) > 0;
+
         $validation = Validator::make($request->all(), [
             'title' => 'required|string|max:100',
             'description' => 'required|string|max:1000',
@@ -72,10 +133,17 @@ class PropertyController extends Controller
             'how_many_bathroom' => 'required|integer|min:1',
             'set_your_price' => 'required|numeric|min:1',
             'amenities' => 'required|array|min:1',
-            'property_images' => 'required|array|min:1',
+            'property_image_keys' => 'sometimes|array',
+            'property_image_keys.*' => 'string|max:500',
+            'tour_video_key' => 'sometimes|string|max:500',
         ]);
         if ($validation->fails()) {
             return response()->json(['errors' => $validation->errors()], 422);
+        }
+        if (!$hasImageFiles && !$hasImageKeys) {
+            return response()->json([
+                'errors' => ['property_images' => ['At least one property image is required.']],
+            ], 422);
         }
         try {
             // Always use authenticated user as the owner of the property
@@ -126,7 +194,6 @@ class PropertyController extends Controller
                     $baseName = time() . rand() . '.' . $extension;
                     $s3Path = 'images/place_gallery_images/' . $baseName;
                     Storage::disk('s3')->put($s3Path, file_get_contents($file));
-                    Log::info($extension);
                     PropertyImages::create([
                         'property_id' => $property_id,
                         'original' => $s3Path,
@@ -135,10 +202,27 @@ class PropertyController extends Controller
                 }
             }
 
+            // New flow: photos pre-uploaded to S3 via presigned URLs.
+            // Frontend sends only the resulting `property_image_keys[]`.
+            $imageKeys = $request->input('property_image_keys', []);
+            if (is_array($imageKeys) && !empty($imageKeys)) {
+                foreach ($imageKeys as $s3Key) {
+                    if (!is_string($s3Key) || $s3Key === '') continue;
+                    $extension = pathinfo($s3Key, PATHINFO_EXTENSION) ?: 'jpg';
+                    PropertyImages::create([
+                        'property_id' => $property_id,
+                        'original' => $s3Key,
+                        'extension' => $extension,
+                    ]);
+                }
+            }
+
             // Optional 3D tour video: send to KIRI Engine for Gaussian Splatting.
             // Errors are absorbed - the property creation itself remains successful.
             if ($request->hasFile('tour_video') && $property) {
                 $this->attachTourVideo($property, $request->file('tour_video'));
+            } elseif ($request->filled('tour_video_key') && $property) {
+                $this->attachTourVideoFromS3Key($property, $request->input('tour_video_key'));
             }
 
             return response()->json([
