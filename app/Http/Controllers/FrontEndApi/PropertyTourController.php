@@ -89,7 +89,7 @@ class PropertyTourController extends Controller
         $property->update([
             'tour_video_path' => $s3Path,
             'tour_3d_serialize' => $serialize,
-            'tour_3d_status' => 'processing',
+            'tour_3d_status' => 'queued',
             'tour_3d_model_url' => null,
             'tour_3d_processed_at' => null,
             'tour_3d_error' => null,
@@ -121,8 +121,15 @@ class PropertyTourController extends Controller
             return response()->json(['status' => 404, 'message' => 'Property not found'], 404);
         }
 
-        if ($property->tour_3d_status === 'processing' && $property->tour_3d_serialize) {
+        // Refresh from KIRI while the model is still being worked on.
+        // KIRI uses status 0 (queued) -> 1 (processing) -> 2 (ready) -> 3 (failed),
+        // so we poll on both 'queued' and 'processing' to catch transitions.
+        if (in_array($property->tour_3d_status, ['queued', 'processing'], true)
+            && $property->tour_3d_serialize) {
             $remote = $this->kiri->getStatus($property->tour_3d_serialize);
+            if ($remote['status'] === 'processing' && $property->tour_3d_status !== 'processing') {
+                $property->update(['tour_3d_status' => 'processing']);
+            }
             if ($remote['status'] === 'ready') {
                 // Download the KIRI ZIP, extract the splat, upload to S3 once.
                 // After this we have a permanent, public URL the browser viewer can load directly.
