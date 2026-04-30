@@ -1,8 +1,8 @@
-service: prelease-backend
+service: prelease-api
 
 provider:
   name: aws
-  region: ca-central-1
+  region: us-east-1
   stage: production
   runtime: provided.al2023
   memorySize: 1024
@@ -75,7 +75,7 @@ provider:
           Resource: '*'
 
 custom:
-  s3Bucket: prelease-backend-storage-${self:provider.stage}
+  s3Bucket: prelease-storage-production
 
 package:
   patterns:
