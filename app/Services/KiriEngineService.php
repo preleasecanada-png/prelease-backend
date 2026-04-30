@@ -69,7 +69,10 @@ class KiriEngineService
             }
 
             $data = $response->json();
-            if (($data['code'] ?? null) !== 0) {
+            // KIRI signals success with either code === 0 (older docs) or
+            // code === 200 (current behaviour). Anything else is an error.
+            $code = $data['code'] ?? null;
+            if ($code !== 0 && $code !== 200) {
                 Log::error('KIRI upload returned error', ['response' => $data]);
                 return null;
             }
@@ -133,8 +136,9 @@ class KiriEngineService
             }
 
             $data = $response->json();
-            if (($data['code'] ?? null) !== 0) {
-                Log::warning('KIRI getModelZip returned non-zero code', ['response' => $data]);
+            $code = $data['code'] ?? null;
+            if ($code !== 0 && $code !== 200) {
+                Log::warning('KIRI getModelZip returned non-success code', ['response' => $data]);
                 return null;
             }
 
