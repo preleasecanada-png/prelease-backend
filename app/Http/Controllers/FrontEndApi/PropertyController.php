@@ -153,14 +153,10 @@ class PropertyController extends Controller
             Log::error('Property store failed: ' . $th->getMessage(), [
                 'file' => $th->getFile(),
                 'line' => $th->getLine(),
-                'trace' => $th->getTraceAsString(),
             ]);
             return response()->json([
                 'status' => 500,
-                'message' => 'Property creation failed',
-                'error' => $th->getMessage(),
-                'file' => basename($th->getFile()),
-                'line' => $th->getLine(),
+                'message' => 'Property creation failed. Please try again.',
             ], 500);
         }
     }
