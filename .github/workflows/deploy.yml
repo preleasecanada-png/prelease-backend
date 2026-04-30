@@ -39,6 +39,8 @@ jobs:
           DB_DATABASE: ${{ secrets.DB_DATABASE }}
           DB_USERNAME: ${{ secrets.DB_USERNAME }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          KIRI_API_KEY: ${{ secrets.KIRI_API_KEY }}
+          KIRI_WEBHOOK_SECRET: ${{ secrets.KIRI_WEBHOOK_SECRET }}
 
       - name: Run Migrations
         run: serverless bref:cli --args="migrate --force" --stage production
@@ -51,3 +53,5 @@ jobs:
           DB_DATABASE: ${{ secrets.DB_DATABASE }}
           DB_USERNAME: ${{ secrets.DB_USERNAME }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          KIRI_API_KEY: ${{ secrets.KIRI_API_KEY }}
+          KIRI_WEBHOOK_SECRET: ${{ secrets.KIRI_WEBHOOK_SECRET }}
