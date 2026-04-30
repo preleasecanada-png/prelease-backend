@@ -229,19 +229,35 @@ class KiriEngineService
             });
             $picked = $candidates[0];
 
-            // 4. Upload to S3 at a stable, public-readable path.
+            // 4. Upload to S3 at a stable path.
+            //    Public read access is granted via the bucket policy on
+            //    `tour-models/*` (BlockPublicAcls is true on the bucket so
+            //    we cannot use object-level ACLs here).
             $extension = $picked['ext'];
             $s3Path = 'tour-models/' . $propertyId . '/model_' . $serialize . '.' . $extension;
-            \Illuminate\Support\Facades\Storage::disk('s3')->put(
-                $s3Path,
-                fopen($picked['path'], 'rb'),
-                'public'
-            );
+            $stream = fopen($picked['path'], 'rb');
+            $uploaded = \Illuminate\Support\Facades\Storage::disk('s3')->put($s3Path, $stream);
+            if (is_resource($stream)) {
+                @fclose($stream);
+            }
+            if (!$uploaded) {
+                Log::error('KIRI splat upload to S3 returned false', [
+                    'serialize' => $serialize,
+                    'property_id' => $propertyId,
+                    's3_path' => $s3Path,
+                ]);
+                return null;
+            }
 
-            // 5. Build the public URL. The S3 disk should already be configured
-            //    with a public visibility default, but we expose the URL via the
-            //    Storage facade for portability.
+            // 5. Build the public URL. The bucket policy makes `tour-models/*`
+            //    publicly readable so the browser viewer can fetch it directly.
             $publicUrl = \Illuminate\Support\Facades\Storage::disk('s3')->url($s3Path);
+            Log::info('KIRI splat uploaded to S3', [
+                'property_id' => $propertyId,
+                's3_path' => $s3Path,
+                'public_url' => $publicUrl,
+                'size' => $picked['size'],
+            ]);
 
             return $publicUrl;
         } catch (\Throwable $e) {
