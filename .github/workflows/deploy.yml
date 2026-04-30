@@ -20,6 +20,18 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --no-dev --optimize-autoloader --no-interaction
 
+      - name: Generate Laravel Passport keys
+        # Lambda's /var/task is read-only, so passport:keys cannot run at
+        # runtime. Generate keys here so they ship inside the deployment zip.
+        # NOTE: This regenerates keys on every deploy, which invalidates all
+        # existing OAuth tokens. To preserve tokens across deploys, store the
+        # keys as GitHub Secrets and write them to disk instead of generating.
+        run: |
+          mkdir -p storage
+          php artisan passport:keys --force
+        env:
+          APP_KEY: ${{ secrets.APP_KEY }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
