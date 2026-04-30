@@ -150,10 +150,18 @@ class PropertyController extends Controller
                 ],
             ]);
         } catch (\Throwable $th) {
-            return response()->json([
-                'error' => $th,
-                'status' => 404
+            Log::error('Property store failed: ' . $th->getMessage(), [
+                'file' => $th->getFile(),
+                'line' => $th->getLine(),
+                'trace' => $th->getTraceAsString(),
             ]);
+            return response()->json([
+                'status' => 500,
+                'message' => 'Property creation failed',
+                'error' => $th->getMessage(),
+                'file' => basename($th->getFile()),
+                'line' => $th->getLine(),
+            ], 500);
         }
     }
 
