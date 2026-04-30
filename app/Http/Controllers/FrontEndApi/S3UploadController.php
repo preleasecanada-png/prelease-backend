@@ -70,17 +70,29 @@ class S3UploadController extends Controller
         try {
             // Build S3 client from Laravel config (works with both s3 and custom endpoints)
             $diskConfig = config('filesystems.disks.s3');
-            $client = new S3Client([
+            $region = $diskConfig['region'] ?? env('AWS_DEFAULT_REGION', 'us-east-1');
+
+            // On Lambda, credentials come from the IAM role (instance profile).
+            // We must NOT pass a credentials array at all if we want the SDK to use the role.
+            // Only pass explicit credentials for local development where key/secret are set.
+            $clientConfig = [
                 'version' => 'latest',
-                'region' => $diskConfig['region'] ?? env('AWS_DEFAULT_REGION', 'us-east-1'),
-                'credentials' => [
-                    'key' => $diskConfig['key'] ?? env('AWS_ACCESS_KEY_ID'),
-                    'secret' => $diskConfig['secret'] ?? env('AWS_SECRET_ACCESS_KEY'),
-                ],
-                // Use path-style endpoint if configured (for MinIO, LocalStack, etc.)
-                'endpoint' => $diskConfig['endpoint'] ?? null,
-                'use_path_style_endpoint' => $diskConfig['use_path_style_endpoint'] ?? false,
-            ]);
+                'region' => $region,
+            ];
+
+            $key = $diskConfig['key'] ?? env('AWS_ACCESS_KEY_ID');
+            $secret = $diskConfig['secret'] ?? env('AWS_SECRET_ACCESS_KEY');
+            if (!empty($key) && !empty($secret)) {
+                $clientConfig['credentials'] = ['key' => $key, 'secret' => $secret];
+            }
+
+            // Support custom S3-compatible endpoints (MinIO, LocalStack, etc.)
+            if (!empty($diskConfig['endpoint'])) {
+                $clientConfig['endpoint'] = $diskConfig['endpoint'];
+                $clientConfig['use_path_style_endpoint'] = $diskConfig['use_path_style_endpoint'] ?? false;
+            }
+
+            $client = new S3Client($clientConfig);
 
             $bucket = $diskConfig['bucket'] ?? env('AWS_BUCKET');
 
@@ -92,7 +104,12 @@ class S3UploadController extends Controller
 
             $presignedRequest = $client->createPresignedRequest($command, '+15 minutes');
             $uploadUrl = (string) $presignedRequest->getUri();
-            $publicUrl = rtrim($diskConfig['url'] ?? "https://{$bucket}.s3.amazonaws.com", '/') . '/' . $s3Key;
+
+            // Build public URL (virtual-hosted style is the modern standard)
+            $publicUrl = "https://{$bucket}.s3.{$region}.amazonaws.com/{$s3Key}";
+            if (!empty($diskConfig['url'])) {
+                $publicUrl = rtrim($diskConfig['url'], '/') . '/' . $s3Key;
+            }
 
             return response()->json([
                 'status' => 200,
