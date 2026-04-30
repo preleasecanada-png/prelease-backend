@@ -32,6 +32,10 @@ jobs:
         env:
           APP_KEY: ${{ secrets.APP_KEY }}
 
+      - name: Refresh autoloader
+        # Ensure any newly added classes since the last composer install are discoverable
+        run: composer dump-autoload --optimize --no-dev
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
