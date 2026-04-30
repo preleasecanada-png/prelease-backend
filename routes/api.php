@@ -232,8 +232,8 @@ Route::post('/twilio/gather', [VirtualAssistantController::class, 'handleVoiceGa
     Route::delete('property/{id}/tour-video', [PropertyTourController::class, 'deleteVideo']);
 
     // Direct S3 uploads (bypass API Gateway 10 MB limit)
-    Route::post('s3/presign', [S3UploadController::class, 'presign']);
-    Route::post('s3/confirm', [S3UploadController::class, 'confirm']);
+    Route::post('s3/presign', [PropertyTourController::class, 'presignS3Upload']);
+    Route::post('s3/confirm', [PropertyTourController::class, 'confirmS3Upload']);
 });
 
 // Public: tour status (renters need to read it) and KIRI webhook callback
