@@ -150,17 +150,10 @@ functions:
 
 resources:
   Resources:
-    # S3 Bucket for file storage (property images, documents, etc.)
-    StorageBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketName: ${self:custom.s3Bucket}
-        CorsConfiguration:
-          CorsRules:
-            - AllowedHeaders: ['*']
-              AllowedMethods: [GET, PUT, POST, DELETE]
-              AllowedOrigins: ['*']
-              MaxAge: 3600
+    # NOTE: S3 bucket `prelease-storage-production` already exists in us-east-1.
+    # We reference it via AWS_BUCKET env var, not via CloudFormation, to avoid
+    # "AlreadyExists" errors on every deploy. The bucket was created manually
+    # before this serverless config existed.
 
     # SQS Queue for background jobs (emails, notifications)
     JobsQueue:
