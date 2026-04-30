@@ -20,17 +20,27 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --no-dev --optimize-autoloader --no-interaction
 
-      - name: Generate Laravel Passport keys
-        # Lambda's /var/task is read-only, so passport:keys cannot run at
-        # runtime. Generate keys here so they ship inside the deployment zip.
-        # NOTE: This regenerates keys on every deploy, which invalidates all
-        # existing OAuth tokens. To preserve tokens across deploys, store the
-        # keys as GitHub Secrets and write them to disk instead of generating.
+      - name: Write Laravel Passport keys from secrets
+        # Lambda's /var/task is read-only, so the keys must be in the deploy zip.
+        # We use static keys stored in GitHub Secrets so OAuth tokens stay valid
+        # across deploys. If the secrets are missing, we fall back to generating
+        # fresh keys (which will invalidate all existing tokens).
         run: |
           mkdir -p storage
-          php artisan passport:keys --force
+          if [ -n "$OAUTH_PRIVATE_KEY" ] && [ -n "$OAUTH_PUBLIC_KEY" ]; then
+            echo "Using OAuth keys from secrets"
+            printf '%s' "$OAUTH_PRIVATE_KEY" > storage/oauth-private.key
+            printf '%s' "$OAUTH_PUBLIC_KEY" > storage/oauth-public.key
+            chmod 600 storage/oauth-private.key
+            chmod 644 storage/oauth-public.key
+          else
+            echo "WARNING: OAUTH_*_KEY secrets missing — generating fresh keys (invalidates tokens)"
+            php artisan passport:keys --force
+          fi
         env:
           APP_KEY: ${{ secrets.APP_KEY }}
+          OAUTH_PRIVATE_KEY: ${{ secrets.OAUTH_PRIVATE_KEY }}
+          OAUTH_PUBLIC_KEY: ${{ secrets.OAUTH_PUBLIC_KEY }}
 
       - name: Refresh autoloader
         # Ensure any newly added classes since the last composer install are discoverable
