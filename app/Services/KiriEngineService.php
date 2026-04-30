@@ -145,6 +145,124 @@ class KiriEngineService
         }
     }
 
+    /**
+     * Download the KIRI ZIP, extract the first viewable Gaussian Splat file
+     * (.splat preferred, .ply fallback) and upload it to a permanent S3
+     * location. Returns the public URL of the extracted file or null on
+     * failure.
+     *
+     * The browser viewer (@mkkellogg/gaussian-splats-3d) needs a direct file
+     * URL, so we cannot use the temporary signed URL provided by KIRI.
+     *
+     * Memory note: Lambda /tmp is capped at ~512 MB. Typical KIRI splats are
+     * 30-150 MB so this fits comfortably. We stream the download to disk
+     * rather than loading it in memory.
+     */
+    public function downloadAndExtractSplat(string $serialize, int $propertyId): ?string
+    {
+        $modelUrl = $this->getModelUrl($serialize);
+        if (!$modelUrl) {
+            Log::warning('Cannot extract splat: missing KIRI model URL', ['serialize' => $serialize]);
+            return null;
+        }
+
+        $tmpDir = sys_get_temp_dir() . '/kiri_' . $serialize;
+        $zipPath = $tmpDir . '.zip';
+
+        try {
+            if (!is_dir($tmpDir)) {
+                mkdir($tmpDir, 0755, true);
+            }
+
+            // 1. Stream the KIRI ZIP to /tmp so we don't OOM on big payloads.
+            $context = stream_context_create([
+                'http' => ['timeout' => 600],
+                'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+            ]);
+            $bytesWritten = file_put_contents($zipPath, fopen($modelUrl, 'rb', false, $context));
+            if ($bytesWritten === false || $bytesWritten === 0) {
+                Log::error('KIRI zip download failed', ['url' => $modelUrl]);
+                return null;
+            }
+
+            // 2. Extract using PHP's built-in ZipArchive.
+            if (!class_exists(\ZipArchive::class)) {
+                Log::error('ZipArchive extension is not available in this PHP runtime');
+                return null;
+            }
+
+            $zip = new \ZipArchive();
+            if ($zip->open($zipPath) !== true) {
+                Log::error('Could not open KIRI zip archive', ['path' => $zipPath]);
+                return null;
+            }
+            $zip->extractTo($tmpDir);
+            $zip->close();
+
+            // 3. Find the best splat file inside the extraction dir.
+            //    Order of preference: .splat > .ksplat > .ply (largest size wins as tiebreaker).
+            $candidates = [];
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($tmpDir, \RecursiveDirectoryIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $file) {
+                if (!$file->isFile()) continue;
+                $ext = strtolower($file->getExtension());
+                if (in_array($ext, ['splat', 'ksplat', 'ply'])) {
+                    $candidates[] = ['path' => $file->getPathname(), 'ext' => $ext, 'size' => $file->getSize()];
+                }
+            }
+
+            if (empty($candidates)) {
+                Log::warning('KIRI zip contained no splat/ply file', ['contents_dir' => $tmpDir]);
+                return null;
+            }
+
+            usort($candidates, function ($a, $b) {
+                $rank = ['splat' => 3, 'ksplat' => 2, 'ply' => 1];
+                $diff = ($rank[$b['ext']] ?? 0) - ($rank[$a['ext']] ?? 0);
+                return $diff !== 0 ? $diff : ($b['size'] - $a['size']);
+            });
+            $picked = $candidates[0];
+
+            // 4. Upload to S3 at a stable, public-readable path.
+            $extension = $picked['ext'];
+            $s3Path = 'tour-models/' . $propertyId . '/model_' . $serialize . '.' . $extension;
+            \Illuminate\Support\Facades\Storage::disk('s3')->put(
+                $s3Path,
+                fopen($picked['path'], 'rb'),
+                'public'
+            );
+
+            // 5. Build the public URL. The S3 disk should already be configured
+            //    with a public visibility default, but we expose the URL via the
+            //    Storage facade for portability.
+            $publicUrl = \Illuminate\Support\Facades\Storage::disk('s3')->url($s3Path);
+
+            return $publicUrl;
+        } catch (\Throwable $e) {
+            Log::error('KIRI splat extraction failed: ' . $e->getMessage());
+            return null;
+        } finally {
+            // Clean up temp files so we don't fill up /tmp on warm Lambda invocations.
+            try {
+                if (is_file($zipPath)) @unlink($zipPath);
+                if (is_dir($tmpDir)) {
+                    $iterator = new \RecursiveIteratorIterator(
+                        new \RecursiveDirectoryIterator($tmpDir, \RecursiveDirectoryIterator::SKIP_DOTS),
+                        \RecursiveIteratorIterator::CHILD_FIRST
+                    );
+                    foreach ($iterator as $file) {
+                        $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
+                    }
+                    @rmdir($tmpDir);
+                }
+            } catch (\Throwable $cleanup) {
+                // best-effort cleanup
+            }
+        }
+    }
+
     protected function mapStatus($code): string
     {
         return match ((int) $code) {

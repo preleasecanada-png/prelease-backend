@@ -124,32 +124,33 @@ class PropertyTourController extends Controller
         if ($property->tour_3d_status === 'processing' && $property->tour_3d_serialize) {
             $remote = $this->kiri->getStatus($property->tour_3d_serialize);
             if ($remote['status'] === 'ready') {
-                $url = $this->kiri->getModelUrl($property->tour_3d_serialize);
-                if ($url) {
+                // Download the KIRI ZIP, extract the splat, upload to S3 once.
+                // After this we have a permanent, public URL the browser viewer can load directly.
+                $publicUrl = $this->kiri->downloadAndExtractSplat($property->tour_3d_serialize, $property->id);
+                if ($publicUrl) {
                     $property->update([
                         'tour_3d_status' => 'ready',
-                        'tour_3d_model_url' => $url,
+                        'tour_3d_model_url' => $publicUrl,
                         'tour_3d_processed_at' => now(),
                         'tour_3d_error' => null,
                     ]);
+                } else {
+                    // Fallback: keep the temporary KIRI URL so users can at least download the ZIP.
+                    $tmp = $this->kiri->getModelUrl($property->tour_3d_serialize);
+                    if ($tmp) {
+                        $property->update([
+                            'tour_3d_status' => 'ready',
+                            'tour_3d_model_url' => $tmp,
+                            'tour_3d_processed_at' => now(),
+                            'tour_3d_error' => 'In-app 3D viewer unavailable, model can still be downloaded.',
+                        ]);
+                    }
                 }
             } elseif ($remote['status'] === 'failed') {
                 $property->update([
                     'tour_3d_status' => 'failed',
                     'tour_3d_error' => 'KIRI Engine reported a processing failure.',
                 ]);
-            }
-        } elseif ($property->tour_3d_status === 'ready' && $property->tour_3d_serialize) {
-            // The download URL is signed and expires after 60 minutes.
-            // Refresh it every time we are within 5 minutes of expiry.
-            if (!$property->tour_3d_processed_at || $property->tour_3d_processed_at->diffInMinutes(now()) > 55) {
-                $url = $this->kiri->getModelUrl($property->tour_3d_serialize);
-                if ($url) {
-                    $property->update([
-                        'tour_3d_model_url' => $url,
-                        'tour_3d_processed_at' => now(),
-                    ]);
-                }
             }
         }
 
@@ -205,12 +206,13 @@ class PropertyTourController extends Controller
         };
 
         if ($mapped === 'ready') {
-            $url = $this->kiri->getModelUrl($serialize);
+            $publicUrl = $this->kiri->downloadAndExtractSplat($serialize, $property->id);
+            $url = $publicUrl ?: $this->kiri->getModelUrl($serialize);
             $property->update([
                 'tour_3d_status' => 'ready',
                 'tour_3d_model_url' => $url,
                 'tour_3d_processed_at' => now(),
-                'tour_3d_error' => null,
+                'tour_3d_error' => $publicUrl ? null : 'In-app 3D viewer unavailable, model can still be downloaded.',
             ]);
         } elseif ($mapped === 'failed') {
             $property->update([
