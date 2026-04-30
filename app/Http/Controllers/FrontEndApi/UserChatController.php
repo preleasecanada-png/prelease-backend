@@ -12,35 +12,51 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class UserChatController extends Controller
 {
     public function user_chat(Request $request)
     {
-        \Log::info('UserChatController@user_chat called with data: ', [$request->all()]);
+        $authId = Auth::id();
+        if (!$authId) {
+            return response()->json(['status' => 401, 'message' => 'Unauthenticated'], 401);
+        }
+
+        if ((int) $request->received_id === (int) $authId) {
+            return response()->json(['status' => 422, 'message' => 'Cannot send a message to yourself'], 422);
+        }
+
         $userChat = new UserChat();
+        $userChat->sender_id = $authId; // never trust client-supplied sender_id
+        $userChat->received_id = $request->received_id;
+
         if ($request->type == 'text') {
-            $userChat->sender_id = $request->sender_id;
-            $userChat->received_id = $request->received_id;
             $userChat->message = $request->message;
-            $userChat->type = $request->type;
+            $userChat->type = 'text';
             $userChat->save();
         } else {
-            $userChat->sender_id = $request->sender_id;
-            $userChat->received_id = $request->received_id;
             if ($request->hasFile('voice')) {
                 $file = $request->file('voice');
-                $filename = 'images/message-voices/' . uniqid('voice_') . '.' . $file->getClientOriginalExtension();
-                $file->move('images/message-voices/', $filename);
+                $filename = 'message-voices/' . uniqid('voice_') . '.' . $file->getClientOriginalExtension();
+                try {
+                    Storage::disk('s3')->put($filename, file_get_contents($file));
+                } catch (\Throwable $e) {
+                    \Log::warning('S3 voice upload failed, falling back to local: ' . $e->getMessage());
+                    $file->move(public_path('images/message-voices'), basename($filename));
+                    $filename = 'images/message-voices/' . basename($filename);
+                }
                 $userChat->message = $filename;
                 $userChat->type = 'voice';
                 $userChat->save();
+            } else {
+                return response()->json(['status' => 422, 'message' => 'No voice file provided'], 422);
             }
         }
-        $user  = $userChat;
-        try { broadcast(new ChatEvent($user))->toOthers(); } catch (\Throwable $e) { \Log::warning('Broadcast failed: '.$e->getMessage()); }
-        return response()->json(['status' => 200, 'message' => 'User message send successfully!', 'data' => $userChat]);
+
+        try { broadcast(new ChatEvent($userChat))->toOthers(); } catch (\Throwable $e) { \Log::warning('Broadcast failed: '.$e->getMessage()); }
+        return response()->json(['status' => 200, 'message' => 'User message sent successfully!', 'data' => $userChat]);
     }
 
     public function send_message(Request $request)
@@ -56,6 +72,10 @@ class UserChatController extends Controller
                 'message' => 'Validation error',
                 'errors' => $validator->errors()
             ], 422);
+        }
+
+        if ((int) $request->received_id === (int) Auth::id()) {
+            return response()->json(['status' => 422, 'message' => 'Cannot send a message to yourself'], 422);
         }
 
         try {
@@ -352,7 +372,12 @@ class UserChatController extends Controller
     protected function users()
     {
         try {
-            $users = User::where('role', '!=', 'admin')->get();
+            // Return only public-safe fields. Email is included since multiple
+            // account-related pages depend on it. Phone, DOB, bio, gender, social
+            // IDs and verification status are intentionally omitted.
+            $users = User::where('role', '!=', 'admin')
+                ->select('id', 'first_name', 'last_name', 'user_name', 'email', 'picture', 'role')
+                ->get();
             return response()->json(['status' => 200, 'data' => $users]);
         } catch (\Throwable $th) {
             return response()->json(['status' => 404, 'error' => $th->getMessage()]);
