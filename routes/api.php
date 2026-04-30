@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\FrontEndApi\PropertyController;
+use App\Http\Controllers\FrontEndApi\PropertyTourController;
 use App\Http\Controllers\FrontEndApi\UserChatController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\FrontEndApi\AuthApiController;
@@ -225,7 +226,15 @@ Route::post('/twilio/gather', [VirtualAssistantController::class, 'handleVoiceGa
     Route::post('property/{id}/update', [PropertyController::class, 'update']);
     Route::delete('property/{id}', [PropertyController::class, 'destroy']);
     Route::delete('property/image/{imageId}', [PropertyController::class, 'deleteImage']);
+
+    // 3D Virtual Tour (KIRI Engine)
+    Route::post('property/{id}/tour-video', [PropertyTourController::class, 'uploadVideo']);
+    Route::delete('property/{id}/tour-video', [PropertyTourController::class, 'deleteVideo']);
 });
+
+// Public: tour status (renters need to read it) and KIRI webhook callback
+Route::get('property/{id}/tour-status', [PropertyTourController::class, 'status']);
+Route::post('webhooks/kiri-engine', [PropertyTourController::class, 'webhook']);
 Route::prefix('property')->controller(PropertyController::class)->group(function () {
     Route::get('lists', 'lists');
 });

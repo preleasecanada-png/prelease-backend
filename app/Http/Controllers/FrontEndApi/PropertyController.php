@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\FrontEndApi;
 
 use App\Models\Property;
+use App\Services\KiriEngineService;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
@@ -18,6 +19,44 @@ use Illuminate\Support\Facades\Validator;
 
 class PropertyController extends Controller
 {
+    /**
+     * Persist the optional walk-through video on S3 and forward it to KIRI Engine
+     * for 3D Gaussian Splatting reconstruction. Failures are logged but never
+     * abort the surrounding property save - the host can retry later.
+     */
+    protected function attachTourVideo(Property $property, $file): void
+    {
+        if (!$file) return;
+        try {
+            $extension = $file->getClientOriginalExtension() ?: 'mp4';
+            $s3Path = 'tour-videos/' . $property->id . '/' . uniqid('tour_') . '.' . $extension;
+            Storage::disk('s3')->put($s3Path, file_get_contents($file->getRealPath()));
+            $property->tour_video_path = $s3Path;
+
+            $kiri = app(KiriEngineService::class);
+            if ($kiri->isConfigured()) {
+                $serialize = $kiri->uploadVideo($file->getRealPath(), generateMesh: false);
+                if ($serialize) {
+                    $property->tour_3d_serialize = $serialize;
+                    $property->tour_3d_status = 'processing';
+                    $property->tour_3d_error = null;
+                } else {
+                    $property->tour_3d_status = 'failed';
+                    $property->tour_3d_error = 'KIRI Engine rejected the upload. You can retry later.';
+                }
+            } else {
+                // Service not configured: keep the video, mark as queued for later processing.
+                $property->tour_3d_status = 'queued';
+                $property->tour_3d_error = '3D conversion service is not configured yet.';
+            }
+            $property->save();
+        } catch (\Throwable $e) {
+            Log::warning('Tour video attach failed: ' . $e->getMessage());
+            $property->tour_3d_status = 'failed';
+            $property->tour_3d_error = 'Could not store the tour video.';
+            $property->save();
+        }
+    }
     protected function store(Request $request)
     {
         $validation = Validator::make($request->all(), [
@@ -95,9 +134,20 @@ class PropertyController extends Controller
                     ]);
                 }
             }
+
+            // Optional 3D tour video: send to KIRI Engine for Gaussian Splatting.
+            // Errors are absorbed - the property creation itself remains successful.
+            if ($request->hasFile('tour_video') && $property) {
+                $this->attachTourVideo($property, $request->file('tour_video'));
+            }
+
             return response()->json([
                 'message' => 'Property created successfully',
-                'status' => 200
+                'status' => 200,
+                'data' => [
+                    'id' => $property?->id,
+                    'tour_3d_status' => $property?->tour_3d_status,
+                ],
             ]);
         } catch (\Throwable $th) {
             return response()->json([
@@ -439,6 +489,21 @@ class PropertyController extends Controller
                         'extension' => $extension ?? 'png',
                     ]);
                 }
+            }
+
+            // Replace the 3D tour if a new walk-through video is provided.
+            if ($request->hasFile('tour_video')) {
+                if ($property->tour_video_path && Storage::disk('s3')->exists($property->tour_video_path)) {
+                    try { Storage::disk('s3')->delete($property->tour_video_path); } catch (\Throwable $e) {}
+                }
+                $property->tour_video_path = null;
+                $property->tour_3d_serialize = null;
+                $property->tour_3d_status = 'none';
+                $property->tour_3d_model_url = null;
+                $property->tour_3d_processed_at = null;
+                $property->tour_3d_error = null;
+                $property->save();
+                $this->attachTourVideo($property, $request->file('tour_video'));
             }
 
             return response()->json([

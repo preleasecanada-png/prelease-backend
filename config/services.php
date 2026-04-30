@@ -68,4 +68,9 @@ return [
         'url' => env('FRONTEND_URL', 'https://www.preleasecanada.ca'),
     ],
 
+    'kiri' => [
+        'api_key' => env('KIRI_API_KEY'),
+        'webhook_secret' => env('KIRI_WEBHOOK_SECRET'),
+    ],
+
 ];

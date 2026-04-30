@@ -1,0 +1,256 @@
+<?php
+
+namespace App\Http\Controllers\FrontEndApi;
+
+use App\Http\Controllers\Controller;
+use App\Models\Property;
+use App\Services\KiriEngineService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
+
+/**
+ * Endpoints related to the 3D virtual tour feature.
+ *
+ * The pipeline:
+ *  1. Host uploads a walk-through video via POST /properties/{id}/tour-video.
+ *  2. The video is stored on S3 (for retention) and forwarded to KIRI Engine.
+ *  3. KIRI returns a "serialize" id we persist on the property.
+ *  4. The host (and renters) can poll GET /properties/{id}/tour-status to
+ *     check progress. Optionally, KIRI calls our webhook when the model is ready.
+ *  5. When ready we expose the temporary download URL so the frontend can
+ *     load the Gaussian Splat in a 3D viewer.
+ */
+class PropertyTourController extends Controller
+{
+    public function __construct(protected KiriEngineService $kiri) {}
+
+    /**
+     * Upload (or replace) a tour video for a property the caller owns.
+     */
+    public function uploadVideo(Request $request, $id)
+    {
+        $authUser = Auth::user();
+        if (!$authUser) {
+            return response()->json(['status' => 401, 'message' => 'Unauthenticated'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            // Up to 250 MB to leave headroom for typical 1080p / 3-minute clips
+            'tour_video' => 'required|file|mimetypes:video/mp4,video/quicktime,video/webm,video/x-msvideo|max:262144',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['status' => 422, 'errors' => $validator->errors()], 422);
+        }
+
+        try {
+            $property = Property::where('user_id', $authUser->id)->findOrFail($id);
+        } catch (\Throwable $e) {
+            return response()->json(['status' => 404, 'message' => 'Property not found'], 404);
+        }
+
+        if (!$this->kiri->isConfigured()) {
+            return response()->json([
+                'status' => 503,
+                'message' => 'The 3D tour service is not configured on this server.',
+            ], 503);
+        }
+
+        $file = $request->file('tour_video');
+        $extension = $file->getClientOriginalExtension() ?: 'mp4';
+        $s3Path = 'tour-videos/' . $property->id . '/' . uniqid('tour_') . '.' . $extension;
+
+        // 1. Persist the original video on S3 first so we always retain it.
+        try {
+            Storage::disk('s3')->put($s3Path, file_get_contents($file->getRealPath()));
+        } catch (\Throwable $e) {
+            Log::error('Tour video S3 upload failed: ' . $e->getMessage());
+            return response()->json(['status' => 500, 'message' => 'Could not store the video.'], 500);
+        }
+
+        // 2. Forward the same physical file to KIRI Engine for 3DGS processing.
+        $serialize = $this->kiri->uploadVideo($file->getRealPath(), generateMesh: false);
+        if (!$serialize) {
+            // Rollback: keep the video, but mark the tour as failed and surface a clear error.
+            $property->update([
+                'tour_video_path' => $s3Path,
+                'tour_3d_status' => 'failed',
+                'tour_3d_error' => 'KIRI upload failed. Please try again.',
+            ]);
+            return response()->json([
+                'status' => 502,
+                'message' => 'Video stored, but the 3D conversion service rejected the upload. You can retry later.',
+                'data' => $property->fresh(),
+            ], 502);
+        }
+
+        $property->update([
+            'tour_video_path' => $s3Path,
+            'tour_3d_serialize' => $serialize,
+            'tour_3d_status' => 'processing',
+            'tour_3d_model_url' => null,
+            'tour_3d_processed_at' => null,
+            'tour_3d_error' => null,
+        ]);
+
+        return response()->json([
+            'status' => 200,
+            'message' => 'Video uploaded. Your 3D tour is being generated, this usually takes 5 to 30 minutes.',
+            'data' => [
+                'tour_3d_status' => $property->tour_3d_status,
+                'tour_3d_serialize' => $property->tour_3d_serialize,
+                'tour_video_path' => $property->tour_video_path,
+            ],
+        ]);
+    }
+
+    /**
+     * Returns the latest tour status for a property. Anyone can call this
+     * (renters need it to render the viewer); the data exposed is harmless.
+     *
+     * If the status is currently "processing", we proactively refresh it from
+     * KIRI Engine (cheap GET) so the user does not have to wait for the
+     * webhook. When KIRI reports "ready" we fetch and persist the model URL.
+     */
+    public function status($id)
+    {
+        $property = Property::find($id);
+        if (!$property) {
+            return response()->json(['status' => 404, 'message' => 'Property not found'], 404);
+        }
+
+        if ($property->tour_3d_status === 'processing' && $property->tour_3d_serialize) {
+            $remote = $this->kiri->getStatus($property->tour_3d_serialize);
+            if ($remote['status'] === 'ready') {
+                $url = $this->kiri->getModelUrl($property->tour_3d_serialize);
+                if ($url) {
+                    $property->update([
+                        'tour_3d_status' => 'ready',
+                        'tour_3d_model_url' => $url,
+                        'tour_3d_processed_at' => now(),
+                        'tour_3d_error' => null,
+                    ]);
+                }
+            } elseif ($remote['status'] === 'failed') {
+                $property->update([
+                    'tour_3d_status' => 'failed',
+                    'tour_3d_error' => 'KIRI Engine reported a processing failure.',
+                ]);
+            }
+        } elseif ($property->tour_3d_status === 'ready' && $property->tour_3d_serialize) {
+            // The download URL is signed and expires after 60 minutes.
+            // Refresh it every time we are within 5 minutes of expiry.
+            if (!$property->tour_3d_processed_at || $property->tour_3d_processed_at->diffInMinutes(now()) > 55) {
+                $url = $this->kiri->getModelUrl($property->tour_3d_serialize);
+                if ($url) {
+                    $property->update([
+                        'tour_3d_model_url' => $url,
+                        'tour_3d_processed_at' => now(),
+                    ]);
+                }
+            }
+        }
+
+        return response()->json([
+            'status' => 200,
+            'data' => [
+                'tour_3d_status' => $property->tour_3d_status,
+                'tour_3d_model_url' => $property->tour_3d_model_url,
+                'tour_3d_processed_at' => $property->tour_3d_processed_at,
+                'tour_3d_error' => $property->tour_3d_error,
+                'has_tour_video' => !empty($property->tour_video_path),
+            ],
+        ]);
+    }
+
+    /**
+     * Webhook endpoint called by KIRI Engine when a model's status changes.
+     *
+     * Configure in KIRI dashboard:
+     *   Callback URL: https://<your-api>/api/webhooks/kiri-engine
+     *   Signing secret: same value as KIRI_WEBHOOK_SECRET in .env
+     *
+     * Expected payload (per KIRI docs): JSON body with serialize and status.
+     */
+    public function webhook(Request $request)
+    {
+        $providedSecret = $request->header('X-Kiri-Signature') ?? $request->input('signature');
+        $expected = config('services.kiri.webhook_secret');
+        if ($expected && $providedSecret !== $expected) {
+            Log::warning('KIRI webhook rejected: bad signature');
+            return response()->json(['ok' => false], 401);
+        }
+
+        $serialize = $request->input('serialize');
+        $statusCode = $request->input('status');
+        if (!$serialize) {
+            return response()->json(['ok' => false, 'error' => 'missing serialize'], 422);
+        }
+
+        $property = Property::where('tour_3d_serialize', $serialize)->first();
+        if (!$property) {
+            // Acknowledge anyway so KIRI doesn't keep retrying for an unknown task.
+            return response()->json(['ok' => true]);
+        }
+
+        // Map the status; the payload format may vary, so try numeric first then string.
+        $mapped = match ((int) $statusCode) {
+            0 => 'queued',
+            1 => 'processing',
+            2 => 'ready',
+            3 => 'failed',
+            default => is_string($statusCode) ? $statusCode : 'unknown',
+        };
+
+        if ($mapped === 'ready') {
+            $url = $this->kiri->getModelUrl($serialize);
+            $property->update([
+                'tour_3d_status' => 'ready',
+                'tour_3d_model_url' => $url,
+                'tour_3d_processed_at' => now(),
+                'tour_3d_error' => null,
+            ]);
+        } elseif ($mapped === 'failed') {
+            $property->update([
+                'tour_3d_status' => 'failed',
+                'tour_3d_error' => 'KIRI Engine reported a processing failure.',
+            ]);
+        } elseif (in_array($mapped, ['queued', 'processing'])) {
+            $property->update(['tour_3d_status' => 'processing']);
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Remove a tour video and reset the 3D status.
+     */
+    public function deleteVideo($id)
+    {
+        $authUser = Auth::user();
+        if (!$authUser) {
+            return response()->json(['status' => 401, 'message' => 'Unauthenticated'], 401);
+        }
+        $property = Property::where('user_id', $authUser->id)->find($id);
+        if (!$property) {
+            return response()->json(['status' => 404, 'message' => 'Property not found'], 404);
+        }
+
+        if ($property->tour_video_path && Storage::disk('s3')->exists($property->tour_video_path)) {
+            try { Storage::disk('s3')->delete($property->tour_video_path); } catch (\Throwable $e) {}
+        }
+
+        $property->update([
+            'tour_video_path' => null,
+            'tour_3d_serialize' => null,
+            'tour_3d_status' => 'none',
+            'tour_3d_model_url' => null,
+            'tour_3d_processed_at' => null,
+            'tour_3d_error' => null,
+        ]);
+
+        return response()->json(['status' => 200, 'message' => '3D tour removed.']);
+    }
+}
