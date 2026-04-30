@@ -579,8 +579,25 @@ class PropertyController extends Controller
                 }
             }
 
-            // Replace the 3D tour if a new walk-through video is provided.
-            if ($request->hasFile('tour_video')) {
+            // New flow: photos pre-uploaded to S3 via presigned URLs.
+            $imageKeys = $request->input('property_image_keys', []);
+            if (is_array($imageKeys) && !empty($imageKeys)) {
+                foreach ($imageKeys as $s3Key) {
+                    if (!is_string($s3Key) || $s3Key === '') continue;
+                    $extension = pathinfo($s3Key, PATHINFO_EXTENSION) ?: 'jpg';
+                    PropertyImages::create([
+                        'property_id' => $property->id,
+                        'original' => $s3Key,
+                        'extension' => $extension,
+                    ]);
+                }
+            }
+
+            // Replace the 3D tour if a new walk-through video is provided
+            // (either as a multipart file or as a pre-uploaded S3 key).
+            $hasVideoFile = $request->hasFile('tour_video');
+            $hasVideoKey  = $request->filled('tour_video_key');
+            if ($hasVideoFile || $hasVideoKey) {
                 if ($property->tour_video_path && Storage::disk('s3')->exists($property->tour_video_path)) {
                     try { Storage::disk('s3')->delete($property->tour_video_path); } catch (\Throwable $e) {}
                 }
@@ -591,7 +608,12 @@ class PropertyController extends Controller
                 $property->tour_3d_processed_at = null;
                 $property->tour_3d_error = null;
                 $property->save();
-                $this->attachTourVideo($property, $request->file('tour_video'));
+
+                if ($hasVideoFile) {
+                    $this->attachTourVideo($property, $request->file('tour_video'));
+                } else {
+                    $this->attachTourVideoFromS3Key($property, $request->input('tour_video_key'));
+                }
             }
 
             return response()->json([
