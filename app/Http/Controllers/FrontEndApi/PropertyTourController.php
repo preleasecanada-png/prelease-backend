@@ -300,12 +300,20 @@ class PropertyTourController extends Controller
             $diskConfig = config('filesystems.disks.s3');
             $region = $diskConfig['region'] ?? env('AWS_DEFAULT_REGION', 'us-east-1');
 
-            $clientConfig = ['version' => 'latest', 'region' => $region];
-            $key = $diskConfig['key'] ?? env('AWS_ACCESS_KEY_ID');
-            $secret = $diskConfig['secret'] ?? env('AWS_SECRET_ACCESS_KEY');
-            if (!empty($key) && !empty($secret)) {
-                $clientConfig['credentials'] = ['key' => $key, 'secret' => $secret];
-            }
+            // On Lambda, we use the IAM role via instance profile (no explicit key/secret in env).
+            // However, for presigned URLs to work with temporary session credentials,
+            // we must pass the session token along with the credentials.
+            $clientConfig = [
+                'version' => 'latest',
+                'region' => $region,
+                'credentials' => [
+                    'key' => env('AWS_ACCESS_KEY_ID'),
+                    'secret' => env('AWS_SECRET_ACCESS_KEY'),
+                    'token' => env('AWS_SESSION_TOKEN'), // Required for Lambda IAM role sessions
+                ],
+            ];
+
+            // Support custom S3-compatible endpoints (MinIO, LocalStack, etc.)
             if (!empty($diskConfig['endpoint'])) {
                 $clientConfig['endpoint'] = $diskConfig['endpoint'];
                 $clientConfig['use_path_style_endpoint'] = $diskConfig['use_path_style_endpoint'] ?? false;
