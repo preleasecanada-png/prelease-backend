@@ -4,9 +4,9 @@ namespace App\Http\Controllers\FrontEndApi;
 
 use App\Http\Controllers\Controller;
 use App\Models\Referral;
+use App\Services\ReferralService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Str;
 
 class ReferralController extends Controller
 {
@@ -23,11 +23,14 @@ class ReferralController extends Controller
             if ($existing) {
                 return response()->json([
                     'status' => 200,
-                    'data' => ['referral_code' => $existing->referral_code]
+                    'data' => [
+                        'referral_code' => $existing->referral_code,
+                        'referral_link' => config('app.frontend_url') . '/sign-up?ref=' . $existing->referral_code
+                    ]
                 ]);
             }
 
-            $code = 'PRL-' . strtoupper(Str::random(6));
+            $code = ReferralService::generateUniqueCode($user->id);
 
             $referral = Referral::create([
                 'referrer_id' => $user->id,
@@ -38,7 +41,10 @@ class ReferralController extends Controller
             return response()->json([
                 'status' => 200,
                 'message' => 'Referral code generated!',
-                'data' => ['referral_code' => $referral->referral_code]
+                'data' => [
+                    'referral_code' => $referral->referral_code,
+                    'referral_link' => config('app.frontend_url') . '/sign-up?ref=' . $referral->referral_code
+                ]
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => 500, 'error' => $th->getMessage()]);
@@ -90,13 +96,20 @@ class ReferralController extends Controller
             $stats = [
                 'total_referrals' => $referrals->count(),
                 'completed' => $referrals->where('status', 'completed')->count(),
-                'pending' => $referrals->whereIn('status', ['pending', 'registered'])->count(),
-                'total_earned' => $referrals->where('remuneration_paid', true)->sum('remuneration_amount'),
+                'registered' => $referrals->where('status', 'registered')->count(),
+                'pending' => $referrals->where('status', 'pending')->count(),
+                'total_earned' => ReferralService::getTotalEarnings($user->id),
+                'pending_referrals' => ReferralService::getPendingCount($user->id),
+                'bonus_percentage' => 5,
             ];
 
             return response()->json([
                 'status' => 200,
-                'data' => ['referrals' => $referrals, 'stats' => $stats]
+                'data' => [
+                    'referrals' => $referrals,
+                    'stats' => $stats,
+                    'current_referral_code' => $referrals->where('status', 'pending')->first()?->referral_code
+                ]
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => 500, 'error' => $th->getMessage()]);

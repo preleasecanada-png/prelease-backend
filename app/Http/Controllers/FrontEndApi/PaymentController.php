@@ -7,6 +7,7 @@ use App\Models\LeaseAgreement;
 use App\Models\Payment;
 use App\Models\User;
 use App\Notifications\PaymentConfirmationNotification;
+use App\Services\ReferralService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -216,6 +217,17 @@ class PaymentController extends Controller
             $payment->status = 'completed';
             $payment->paid_at = now();
             $payment->save();
+
+            // Process referral bonus (5% of total amount) for the renter's referrer
+            try {
+                ReferralService::processReferralBonus(
+                    $payment->renter_id,
+                    $payment->total_amount
+                );
+            } catch (\Throwable $e) {
+                Log::warning('Referral bonus processing failed: ' . $e->getMessage());
+                // Don't fail the payment if referral processing fails
+            }
 
             // Note: lease.booking relationship is unused since leases are created from rental_applications,
             // not bookings. Booking status update is intentionally omitted.

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\FrontEndApi;
 
 use App\Models\User;
+use App\Models\Referral;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use App\Mail\UserVerificationEmail;
@@ -32,6 +33,7 @@ class AuthApiController extends Controller
             'password' => 'required|min:8',
             'confirm_password' => 'required|same:password|min:8',
             'role' => 'required|in:renter,host,landlord',
+            'referral_code' => 'nullable|string',
         ]);
         if ($validator->fails()) {
             $errors = $validator->errors();
@@ -49,6 +51,12 @@ class AuthApiController extends Controller
             // $user->save();
             $user->verified = Str::random(42);
             $user->save();
+
+            // Apply referral code if provided
+            if ($request->has('referral_code') && !empty($request->referral_code)) {
+                $this->applyReferralCode($request->referral_code, $user->id);
+            }
+
             try {
                 $verify_token = $user->verified;
                 $verificationUrl = route('user.verify_email', $verify_token);
@@ -68,6 +76,46 @@ class AuthApiController extends Controller
             ], 200);
         } catch (\Throwable $th) {
             return response()->json(['error' => $th->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Apply referral code to a newly registered user
+     */
+    private function applyReferralCode(string $code, int $newUserId): void
+    {
+        try {
+            $referral = Referral::where('referral_code', $code)
+                ->where('status', 'pending')
+                ->whereNull('referred_id')
+                ->first();
+
+            if (!$referral) {
+                Log::info('Invalid or expired referral code during registration', ['code' => $code]);
+                return;
+            }
+
+            if ($referral->referrer_id === $newUserId) {
+                Log::info('User tried to use their own referral code', ['user_id' => $newUserId]);
+                return;
+            }
+
+            $referral->referred_id = $newUserId;
+            $referral->status = 'registered';
+            $referral->save();
+
+            Log::info('Referral code applied during registration', [
+                'referral_id' => $referral->id,
+                'referrer_id' => $referral->referrer_id,
+                'referred_id' => $newUserId,
+                'code' => $code
+            ]);
+        } catch (\Throwable $th) {
+            Log::error('Failed to apply referral code during registration', [
+                'code' => $code,
+                'user_id' => $newUserId,
+                'error' => $th->getMessage()
+            ]);
         }
     }
     public function login(Request $request)
