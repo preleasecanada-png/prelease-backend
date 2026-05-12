@@ -21,6 +21,7 @@ class PropertyImages extends Model
         if (!$this->original) {
             return '';
         }
-        return Storage::disk('s3')->url($this->original);
+        // Use temporary signed URL for private S3 bucket (valid for 1 hour)
+        return Storage::disk('s3')->temporaryUrl($this->original, now()->addHour());
     }
 }
