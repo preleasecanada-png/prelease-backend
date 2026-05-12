@@ -21,7 +21,16 @@ class PropertyImages extends Model
         if (!$this->original) {
             return '';
         }
+        $path = is_array($this->original) ? ($this->original['original'] ?? '') : $this->original;
+        if (!$path) {
+            return '';
+        }
         // Use temporary signed URL for private S3 bucket (valid for 1 hour)
-        return Storage::disk('s3')->temporaryUrl($this->original, now()->addHour());
+        try {
+            return Storage::disk('s3')->temporaryUrl($path, now()->addHour());
+        } catch (\Exception $e) {
+            // Fallback to direct URL if signed URL fails
+            return Storage::disk('s3')->url($path);
+        }
     }
 }
