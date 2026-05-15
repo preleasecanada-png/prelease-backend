@@ -17,7 +17,7 @@ class NotificationController extends Controller
     public function index()
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $notifications = Notification::where('user_id', $user->id)
                 ->orderBy('created_at', 'desc')
                 ->paginate(20);
@@ -39,7 +39,7 @@ class NotificationController extends Controller
     public function markAsRead($id)
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $notification = Notification::where('id', $id)
                 ->where('user_id', $user->id)
                 ->firstOrFail();
@@ -55,7 +55,7 @@ class NotificationController extends Controller
     public function markAllAsRead()
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             Notification::where('user_id', $user->id)
                 ->where('is_read', false)
                 ->update(['is_read' => true]);
@@ -69,7 +69,7 @@ class NotificationController extends Controller
     public function unreadCount()
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $count = Notification::where('user_id', $user->id)
                 ->where('is_read', false)
                 ->count();
@@ -83,7 +83,7 @@ class NotificationController extends Controller
     public function destroy($id)
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             Notification::where('id', $id)
                 ->where('user_id', $user->id)
                 ->delete();
@@ -100,10 +100,10 @@ class NotificationController extends Controller
     public function proactive()
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $created = [];
 
-            if ($user->role === 'host') {
+            if (in_array(strtolower($user->role), ['host', 'landlord', 'admin'])) {
                 $created = array_merge($created, $this->remindPendingApplications($user));
                 $created = array_merge($created, $this->remindOpenMaintenance($user));
             } else {
@@ -125,7 +125,7 @@ class NotificationController extends Controller
         $created = [];
         $pending = RentalApplication::with('property')
             ->where('landlord_id', $user->id)
-            ->where('status', 'pending')
+            ->whereIn('status', ['submitted', 'under_review'])
             ->where('created_at', '<=', now()->subHours(24))
             ->get();
 

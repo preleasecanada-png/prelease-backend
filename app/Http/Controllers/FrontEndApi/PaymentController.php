@@ -20,10 +20,15 @@ class PaymentController extends Controller
     {
         try {
             $user = Auth::guard('api')->user();
+            $isAdmin = strtolower($user->role ?? '') === 'admin';
 
-            $payments = Payment::with(['property.propertyImages', 'renter', 'landlord', 'leaseAgreement'])
-                ->orderBy('created_at', 'desc')
-                ->paginate(20);
+            $query = Payment::with(['property.propertyImages', 'renter', 'landlord', 'leaseAgreement']);
+            if (!$isAdmin) {
+                $query->where(function ($q) use ($user) {
+                    $q->where('renter_id', $user->id)->orWhere('landlord_id', $user->id);
+                });
+            }
+            $payments = $query->orderBy('created_at', 'desc')->paginate(20);
 
             return response()->json(['status' => 200, 'data' => $payments]);
         } catch (\Throwable $th) {

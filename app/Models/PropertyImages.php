@@ -25,12 +25,7 @@ class PropertyImages extends Model
         if (!$path) {
             return '';
         }
-        // Use temporary signed URL for private S3 bucket (valid for 1 hour)
-        try {
-            return Storage::disk('s3')->temporaryUrl($path, now()->addHour());
-        } catch (\Exception $e) {
-            // Fallback to direct URL if signed URL fails
-            return Storage::disk('s3')->url($path);
-        }
+        // Return direct S3 URL (bucket must be public for this to work in React Native)
+        return Storage::disk('s3')->url($path);
     }
 }

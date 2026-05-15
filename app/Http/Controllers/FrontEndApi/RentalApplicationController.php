@@ -20,11 +20,15 @@ class RentalApplicationController extends Controller
     {
         try {
             $user = Auth::guard('api')->user();
+            $isAdmin = strtolower($user->role ?? '') === 'admin';
 
-            // All authenticated users (hosts, renters, admins) can see all applications
-            $applications = RentalApplication::with(['property.propertyImages', 'renter', 'landlord', 'documents'])
-                ->orderBy('created_at', 'desc')
-                ->paginate(20);
+            $query = RentalApplication::with(['property.propertyImages', 'renter', 'landlord', 'documents']);
+            if (!$isAdmin) {
+                $query->where(function ($q) use ($user) {
+                    $q->where('renter_id', $user->id)->orWhere('landlord_id', $user->id);
+                });
+            }
+            $applications = $query->orderBy('created_at', 'desc')->paginate(20);
 
             return response()->json(['status' => 200, 'data' => $applications]);
         } catch (\Throwable $th) {

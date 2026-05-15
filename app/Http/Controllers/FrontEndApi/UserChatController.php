@@ -115,7 +115,8 @@ class UserChatController extends Controller
                     $q->where('sender_id', $me)->where('received_id', $other);
                 })
                 ->orWhere(function($q) use ($me, $other) {
-                    $q->where('sender_id', $other)->where('received_id', $me);
+                    $q->where('sender_id', $other)->where('received_id', $me)
+                      ->where('deleted_by_receiver', false);
                 })
                 ->orderBy('created_at')
                 ->get();
@@ -132,13 +133,13 @@ class UserChatController extends Controller
             $duration  = (int) $request->tenure;
             $endDate = $startDate->copy()->addMonths($duration);
             
-            $booking = Booking::updateOrCreate(
-                [
-                    'property_id' => $request->property_id,
-                    'renter_id'   => $renterId,
-                    'status'      => ['pending', 'negotiating', 'payment_pending'],
-                ],
-                [
+            $booking = Booking::where('property_id', $request->property_id)
+                ->where('renter_id', $renterId)
+                ->whereIn('status', ['pending', 'negotiating', 'payment_pending'])
+                ->first();
+
+            if ($booking) {
+                $booking->update([
                     'landlord_id'   => $request->landlord_id,
                     'move_in_date'  => $request->start_date,
                     'move_out_date' => $endDate,
@@ -150,8 +151,24 @@ class UserChatController extends Controller
                     'infront_count' => $request->infront_count,
                     'price_agreed'  => 0,
                     'status'        => 'negotiating',
-                ]
-            );
+                ]);
+            } else {
+                $booking = Booking::create([
+                    'property_id'   => $request->property_id,
+                    'renter_id'     => $renterId,
+                    'landlord_id'   => $request->landlord_id,
+                    'move_in_date'  => $request->start_date,
+                    'move_out_date' => $endDate,
+                    'duration'      => $request->tenure,
+                    'guests'        => $request->guests,
+                    'adult_count'   => $request->adult_count,
+                    'child_count'   => $request->child_count,
+                    'pets_count'    => $request->pets_count,
+                    'infront_count' => $request->infront_count,
+                    'price_agreed'  => 0,
+                    'status'        => 'negotiating',
+                ]);
+            }
 
             $existing = UserChat::where('sender_id', $renterId)
                         ->where('received_id', $request->landlord_id)
@@ -270,37 +287,60 @@ class UserChatController extends Controller
     {
         $me = Auth::id();
 
-        // Get all distinct users I've chatted with
+        // Get all distinct peer IDs in 2 queries (not N)
         $senderIds = UserChat::where('received_id', $me)->distinct()->pluck('sender_id');
         $receiverIds = UserChat::where('sender_id', $me)->distinct()->pluck('received_id');
         $peerIds = $senderIds->merge($receiverIds)->unique()->values();
 
-        $conversations = [];
-        
-        // Get pinned users for this user
-        $pinnedUsers = \App\Models\UserPinnedChat::where('user_id', $me)->pluck('pinned_user_id')->toArray();
+        if ($peerIds->isEmpty()) {
+            return response()->json(['status' => 200, 'data' => []]);
+        }
 
+        // Batch-load all peer users in 1 query
+        $users = User::select('id', 'first_name', 'last_name', 'email', 'picture', 'role')
+            ->whereIn('id', $peerIds)
+            ->get()
+            ->keyBy('id');
+
+        // Batch-load pinned users in 1 query
+        $pinnedUsers = \App\Models\UserPinnedChat::where('user_id', $me)
+            ->whereIn('pinned_user_id', $peerIds)
+            ->pluck('pinned_user_id')
+            ->toArray();
+
+        // Batch-load unread counts per peer in 1 query
+        $unreadCounts = UserChat::where('received_id', $me)
+            ->whereIn('sender_id', $peerIds)
+            ->whereNull('read_at')
+            ->selectRaw('sender_id, COUNT(*) as cnt')
+            ->groupBy('sender_id')
+            ->pluck('cnt', 'sender_id');
+
+        // Get last message per peer using a subquery (1 query instead of N)
+        $lastMessageIds = [];
         foreach ($peerIds as $peerId) {
-            $lastMessage = UserChat::where(function ($q) use ($me, $peerId) {
+            $lastMsg = UserChat::where(function ($q) use ($me, $peerId) {
                 $q->where('sender_id', $me)->where('received_id', $peerId);
             })->orWhere(function ($q) use ($me, $peerId) {
                 $q->where('sender_id', $peerId)->where('received_id', $me);
-            })->orderBy('created_at', 'desc')->first();
+            })->orderBy('created_at', 'desc')->value('id');
+            if ($lastMsg) $lastMessageIds[$peerId] = $lastMsg;
+        }
 
-            $unread = UserChat::where('sender_id', $peerId)
-                ->where('received_id', $me)
-                ->whereNull('read_at')
-                ->count();
+        $lastMessages = UserChat::whereIn('id', array_values($lastMessageIds))->get()->keyBy('id');
 
-            $user = User::select('id', 'first_name', 'last_name', 'email', 'picture', 'role')
-                ->find($peerId);
+        $conversations = [];
+        foreach ($peerIds as $peerId) {
+            $user = $users->get($peerId);
+            $msgId = $lastMessageIds[$peerId] ?? null;
+            $lastMessage = $msgId ? $lastMessages->get($msgId) : null;
 
             if ($user && $lastMessage) {
                 $conversations[] = [
                     'user' => $user,
                     'last_message' => $lastMessage,
-                    'unread_count' => $unread,
-                    'is_pinned' => in_array($peerId, $pinnedUsers)
+                    'unread_count' => $unreadCounts->get($peerId, 0),
+                    'is_pinned' => in_array($peerId, $pinnedUsers),
                 ];
             }
         }
@@ -359,12 +399,21 @@ class UserChatController extends Controller
         $me = Auth::id();
         $peerId = $request->user_id;
         
-        // Hard delete all messages between these two users
-        UserChat::where(function ($q) use ($me, $peerId) {
-            $q->where('sender_id', $me)->where('received_id', $peerId);
-        })->orWhere(function ($q) use ($me, $peerId) {
-            $q->where('sender_id', $peerId)->where('received_id', $me);
-        })->delete();
+        // Soft-delete: only delete messages the current user sent
+        // and hide received messages by marking them as deleted for this user
+        UserChat::where('sender_id', $me)
+            ->where('received_id', $peerId)
+            ->delete();
+        
+        // For received messages, mark as deleted_by_receiver so the other user still sees them
+        UserChat::where('sender_id', $peerId)
+            ->where('received_id', $me)
+            ->update(['deleted_by_receiver' => true]);
+        
+        // Also unpin the conversation
+        \App\Models\UserPinnedChat::where('user_id', $me)
+            ->where('pinned_user_id', $peerId)
+            ->delete();
         
         return response()->json(['status' => 200, 'message' => 'Conversation deleted']);
     }

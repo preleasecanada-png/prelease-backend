@@ -17,7 +17,7 @@ return [
 
     'paths' => ['api/*', 'broadcasting/auth', 'sanctum/csrf-cookie'],
 
-    'allowed_methods' => ['*'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
     'allowed_origins' => array_filter([
         env('FRONTEND_URL', 'http://localhost:3000'),
@@ -32,7 +32,7 @@ return [
         '#^https://.*\.preleasecanada\.ca$#',
     ],
 
-    'allowed_headers' => ['*'],
+    'allowed_headers' => ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
 
     'exposed_headers' => [],
 

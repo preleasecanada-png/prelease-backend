@@ -17,7 +17,7 @@ class DashboardController extends Controller
     public function stats()
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $data = [];
 
             // Determine role based on user's role in database, not request parameter
@@ -77,7 +77,7 @@ class DashboardController extends Controller
     public function landlordReport()
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $isLandlord = in_array(strtolower($user->role), ['landlord', 'host', 'admin']);
             if (!$isLandlord) {
                 return response()->json(['status' => 403, 'message' => 'Unauthorized'], 403);

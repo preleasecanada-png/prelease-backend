@@ -18,7 +18,7 @@ class BackgroundCheckController extends Controller
     public function index()
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
 
             if ($user->role === 'host') {
                 $checks = BackgroundCheck::with(['renter:id,first_name,last_name,email', 'rentalApplication.property:id,title,city'])
@@ -54,7 +54,7 @@ class BackgroundCheckController extends Controller
         }
 
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             if ($user->role !== 'host') {
                 return response()->json(['status' => 403, 'message' => 'Only landlords can request background checks'], 403);
             }
@@ -108,7 +108,7 @@ class BackgroundCheckController extends Controller
     public function consent(Request $request, $id)
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $check = BackgroundCheck::where('renter_id', $user->id)
                 ->where('status', 'pending_consent')
                 ->findOrFail($id);
@@ -158,7 +158,7 @@ class BackgroundCheckController extends Controller
     public function show($id)
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $check = BackgroundCheck::with(['renter:id,first_name,last_name,email', 'rentalApplication.property:id,title,city'])
                 ->where(function ($q) use ($user) {
                     $q->where('landlord_id', $user->id)->orWhere('renter_id', $user->id);

@@ -49,15 +49,18 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 Broadcast::routes(['middleware' => ['auth:api']]);
 
-Route::post('register', [AuthApiController::class, 'register']);
-Route::post('login', [AuthApiController::class, 'login']);
+Route::middleware('rate.limit:5,1')->group(function () {
+    Route::post('register', [AuthApiController::class, 'register']);
+    Route::post('login', [AuthApiController::class, 'login']);
+    Route::post('forgot-password', [AuthApiController::class, 'forgotPassword']);
+    Route::post('reset-password', [AuthApiController::class, 'resetPassword']);
+    Route::post('/google-login', [AuthApiController::class, 'googleLogin']);
+    Route::post('/facebook-login', [AuthApiController::class, 'facebookLogin']);
+    Route::post('/apple-login', [AuthApiController::class, 'appleLogin']);
+});
+
 Route::post('logout', [AuthApiController::class, 'logout']);
 Route::post('token-save', [AuthApiController::class, 'token_save']);
-Route::post('forgot-password', [AuthApiController::class, 'forgotPassword']);
-Route::post('reset-password', [AuthApiController::class, 'resetPassword']);
-Route::post('/google-login', [AuthApiController::class, 'googleLogin']);
-Route::post('/facebook-login', [AuthApiController::class, 'facebookLogin']);
-Route::post('/apple-login', [AuthApiController::class, 'appleLogin']);
 
 
 Route::get('cities', [FetchRecordApi::class, 'cities']);
@@ -82,18 +85,21 @@ Route::middleware('auth:api')->group(function () {
         Route::post('wish-list-create', 'wish_list_store');
         Route::post('wish-list-delete', 'wish_list_delete');
     });
-    Route::get('users', [UserChatController::class, 'users']);
-    Route::post('user-chat', [UserChatController::class, 'user_chat']);
-    Route::post('reserve', [UserChatController::class, 'reserve']);
-    Route::get('chats', [UserChatController::class, 'getChats']);
-    Route::post('send-message', [UserChatController::class, 'send_message']);
-    Route::get('chats/unread-count', [UserChatController::class, 'unreadCount']);
-    Route::post('chats/mark-read', [UserChatController::class, 'markRead']);
-    Route::post('chats/mark-unread', [UserChatController::class, 'markUnread']);
-    Route::post('chats/pin', [UserChatController::class, 'pinConversation']);
-    Route::delete('chats/conversation', [UserChatController::class, 'deleteConversation']);
-    Route::get('chats/conversations', [UserChatController::class, 'conversations']);
-    Route::get('user-detail/{id}', [UserChatController::class, 'user_detail']);
+    Route::middleware('rate.limit:30,1')->group(function () {
+        Route::get('users', [UserChatController::class, 'users']);
+        Route::post('user-chat', [UserChatController::class, 'user_chat']);
+        Route::post('reserve', [UserChatController::class, 'reserve']);
+        Route::get('chats', [UserChatController::class, 'getChats']);
+        Route::post('send-message', [UserChatController::class, 'send_message']);
+        Route::get('chats/unread-count', [UserChatController::class, 'unreadCount']);
+        Route::post('chats/mark-read', [UserChatController::class, 'markRead']);
+        Route::post('chats/mark-unread', [UserChatController::class, 'markUnread']);
+        Route::post('chats/pin', [UserChatController::class, 'pinConversation']);
+        Route::delete('chats/conversation', [UserChatController::class, 'deleteConversation']);
+        Route::get('chats/conversations', [UserChatController::class, 'conversations']);
+        Route::get('user-detail/{id}', [UserChatController::class, 'user_detail']);
+    });
+
     Route::post('profile-update', [AuthApiController::class, 'profile_update']);
 
     // Renter Preferences
@@ -202,6 +208,8 @@ Route::middleware('auth:api')->group(function () {
     Route::prefix('ai-assistant')->controller(AIAssistantController::class)->group(function () {
         Route::post('/chat', 'chat');
         Route::get('/suggestions', 'suggestions');
+        Route::get('/history', 'history');
+        Route::delete('/history', 'clearHistory');
     });
 
     // Virtual Assistant
@@ -214,11 +222,6 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/settings', 'getSettings');
         Route::post('/settings', 'updateSettings');
     });
-
-// Twilio Webhooks (no authentication)
-Route::post('/twilio/sms', [VirtualAssistantController::class, 'handleIncomingSMS']);
-Route::post('/twilio/call', [VirtualAssistantController::class, 'handleIncomingCall']);
-Route::post('/twilio/gather', [VirtualAssistantController::class, 'handleVoiceGather']);
 
     // 
     // My Properties (Landlord)
@@ -235,6 +238,11 @@ Route::post('/twilio/gather', [VirtualAssistantController::class, 'handleVoiceGa
     Route::post('s3/presign', [PropertyTourController::class, 'presignS3Upload']);
     Route::post('s3/confirm', [PropertyTourController::class, 'confirmS3Upload']);
 });
+
+// Twilio Webhooks (no authentication — Twilio calls these directly)
+Route::post('/twilio/sms', [VirtualAssistantController::class, 'handleIncomingSMS']);
+Route::post('/twilio/call', [VirtualAssistantController::class, 'handleIncomingCall']);
+Route::post('/twilio/gather', [VirtualAssistantController::class, 'handleVoiceGather']);
 
 // Public: tour status (renters need to read it) and KIRI webhook callback
 Route::get('property/{id}/tour-status', [PropertyTourController::class, 'status']);

@@ -1,5 +1,5 @@
 param(
-    [string]$ApiBase = "https://xa2g46fwr6.execute-api.us-east-1.amazonaws.com/api"
+    [string]$ApiBase = $env:API_BASE_URL ?? "https://your-api-gateway-url.execute-api.us-east-1.amazonaws.com/api"
 )
 
 # --- Read auth ---

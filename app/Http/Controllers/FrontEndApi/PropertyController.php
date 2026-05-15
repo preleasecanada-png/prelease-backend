@@ -263,6 +263,17 @@ class PropertyController extends Controller
 
             $query = Property::with(['propertyImages', 'amenities', 'user']);
 
+            if ($request->search) {
+                $s = '%' . $request->search . '%';
+                $query->where(function ($q) use ($s) {
+                    $q->where('title', 'LIKE', $s)
+                      ->orWhere('city', 'LIKE', $s)
+                      ->orWhere('address', 'LIKE', $s)
+                      ->orWhere('description', 'LIKE', $s)
+                      ->orWhere('state', 'LIKE', $s);
+                });
+            }
+
             $totalGuests = ($request->adults ?? 0) + ($request->children ?? 0);
 
             if ($totalGuests > 0) {

@@ -14,7 +14,7 @@ class MaintenanceRequestController extends Controller
     public function index()
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $query = MaintenanceRequest::with(['tenant', 'landlord', 'property']);
 
             $isLandlord = in_array(strtolower($user->role), ['landlord', 'host', 'admin']);
@@ -49,7 +49,7 @@ class MaintenanceRequestController extends Controller
                 return response()->json(['status' => 422, 'errors' => $validator->errors()]);
             }
 
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
 
             $photoPaths = [];
             if ($request->hasFile('photos')) {
@@ -94,7 +94,7 @@ class MaintenanceRequestController extends Controller
     public function show($id)
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $isAdmin = strtolower($user->role ?? '') === 'admin';
             $query = MaintenanceRequest::with(['tenant', 'landlord', 'property']);
             if (!$isAdmin) {
@@ -114,7 +114,7 @@ class MaintenanceRequestController extends Controller
     public function updateStatus(Request $request, $id)
     {
         try {
-            $user = Auth::user();
+            $user = Auth::guard('api')->user();
             $maintenanceRequest = MaintenanceRequest::where('landlord_id', $user->id)->findOrFail($id);
 
             $validator = Validator::make($request->all(), [

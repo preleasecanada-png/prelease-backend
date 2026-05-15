@@ -1,4 +1,5 @@
 service: prelease-api
+useDotenv: true
 
 provider:
   name: aws
@@ -50,7 +51,42 @@ provider:
     # automatically sets AWS_DEFAULT_REGION / AWS_REGION (reserved keys),
     # so we only need to point at the bucket here.
     AWS_BUCKET: ${self:custom.s3Bucket}
-    # KIRI Engine (3D Gaussian Splatting) — set in local .env, never hard-code here.
+    # --- Mail ---
+    MAIL_MAILER: smtp
+    MAIL_HOST: smtp.gmail.com
+    MAIL_PORT: 587
+    MAIL_USERNAME: ${env:MAIL_USERNAME}
+    MAIL_PASSWORD: ${env:MAIL_PASSWORD}
+    MAIL_ENCRYPTION: tls
+    MAIL_FROM_ADDRESS: ${env:MAIL_FROM_ADDRESS, 'preleasecanada@gmail.com'}
+    MAIL_FROM_NAME: 'PreLease Canada'
+    # --- Google OAuth ---
+    GOOGLE_CLIENT_ID: ${env:GOOGLE_CLIENT_ID}
+    GOOGLE_CLIENT_SECRET: ${env:GOOGLE_CLIENT_SECRET}
+    GOOGLE_REDIRECT_URL: ${env:GOOGLE_REDIRECT_URL}
+    # --- Pusher (real-time chat) ---
+    BROADCAST_DRIVER: pusher
+    PUSHER_APP_ID: ${env:PUSHER_APP_ID}
+    PUSHER_APP_KEY: ${env:PUSHER_APP_KEY}
+    PUSHER_APP_SECRET: ${env:PUSHER_APP_SECRET}
+    PUSHER_APP_CLUSTER: ${env:PUSHER_APP_CLUSTER, 'mt1'}
+    # --- OpenAI ---
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY, ''}
+    OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-4o-mini'}
+    # --- Groq ---
+    GROQ_API_KEY: ${env:GROQ_API_KEY, ''}
+    GROQ_MODEL: ${env:GROQ_MODEL, 'llama-3.3-70b-versatile'}
+    # --- Twilio ---
+    TWILIO_ACCOUNT_SID: ${env:TWILIO_ACCOUNT_SID, ''}
+    TWILIO_AUTH_TOKEN: ${env:TWILIO_AUTH_TOKEN, ''}
+    TWILIO_PHONE_NUMBER: ${env:TWILIO_PHONE_NUMBER, ''}
+    TWILIO_API_KEY_SID: ${env:TWILIO_API_KEY_SID, ''}
+    TWILIO_API_KEY_SECRET: ${env:TWILIO_API_KEY_SECRET, ''}
+    # --- Stripe ---
+    STRIPE_KEY: ${env:STRIPE_KEY, ''}
+    STRIPE_SECRET: ${env:STRIPE_SECRET, ''}
+    STRIPE_WEBHOOK_SECRET: ${env:STRIPE_WEBHOOK_SECRET, ''}
+    # --- KIRI Engine (3D Gaussian Splatting) ---
     KIRI_API_KEY: ${env:KIRI_API_KEY, ''}
     KIRI_WEBHOOK_SECRET: ${env:KIRI_WEBHOOK_SECRET, ''}
 
@@ -59,13 +95,20 @@ provider:
       statements:
         - Effect: Allow
           Action:
-            - s3:*
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+            - s3:ListBucket
           Resource:
             - !Sub 'arn:aws:s3:::${self:custom.s3Bucket}'
             - !Sub 'arn:aws:s3:::${self:custom.s3Bucket}/*'
         - Effect: Allow
           Action:
-            - sqs:*
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            - sqs:ChangeMessageVisibility
           Resource:
             - !GetAtt JobsQueue.Arn
         - Effect: Allow
